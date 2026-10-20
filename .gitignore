@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+.dev.vars
+pruebas/enviados.jsonl
+pruebas/cookie.txt
+pruebas/*.log
+pruebas/*.png
+copia-coyote.sql

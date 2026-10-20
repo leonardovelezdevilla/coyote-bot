@@ -1,0 +1,44 @@
+name = "coyote-bot"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[vars]
+# Identificador del número de WhatsApp (Meta → WhatsApp → Configuración de la API)
+PHONE_NUMBER_ID = "COMPLETAR"
+GRAPH_VERSION = "v23.0"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "coyote-bot"
+# Lo da el comando: npx wrangler d1 create coyote-bot
+database_id = "COMPLETAR"
+
+[triggers]
+# Cada hora en punto: el bot revisa qué automatizaciones tocan según la hora de Lima
+crons = ["0 * * * *"]
+
+# Copias de seguridad semanales (opcional). Crea el depósito con: npx wrangler r2 bucket create coyote-copias
+# Si no quieres usarlo, borra estas tres líneas.
+[[r2_buckets]]
+binding = "COPIAS"
+bucket_name = "coyote-copias"
+
+[observability]
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Entorno de PRUEBA: otro Worker y otra base, para probar cambios sin tocar a los
+# papás. Se publica con: npm run deploy:prueba   (dirección coyote-bot-prueba.*.workers.dev)
+# Crea su base con: npx wrangler d1 create coyote-bot-prueba  y pega el id abajo.
+[env.prueba]
+name = "coyote-bot-prueba"
+vars = { PHONE_NUMBER_ID = "COMPLETAR", GRAPH_VERSION = "v23.0" }
+[[env.prueba.d1_databases]]
+binding = "DB"
+database_name = "coyote-bot-prueba"
+database_id = "COMPLETAR"
+[env.prueba.triggers]
+crons = ["0 * * * *"]
+[[env.prueba.r2_buckets]]
+binding = "COPIAS"
+bucket_name = "coyote-copias-prueba"

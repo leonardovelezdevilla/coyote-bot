@@ -1,0 +1,6 @@
+# Solo para probar en tu computadora con "npm run dev".
+# Copia este archivo como .dev.vars y cambia los valores.
+WHATSAPP_TOKEN=pega-aqui-un-token
+APP_SECRET=pega-aqui-la-clave-secreta-de-la-app
+VERIFY_TOKEN=una-frase-larga-sin-espacios
+ADMIN_PASSWORD=una-clave-para-el-panel
