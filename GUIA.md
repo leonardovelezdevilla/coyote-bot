@@ -357,6 +357,13 @@ Flujo de trabajo: cambio → `npm test` en la computadora → `npm run deploy:pr
 - **Copia mensual de Katy:** el resumen del día 1 le recuerda descargar la **copia completa** desde Números y guardarla en su Google Drive. También `npm run db:copia` descarga un `.sql` desde la computadora.
 - Las copias no incluyen los PIN del personal (se vuelven a asignar si hace falta).
 
+## Avisos del propio sistema
+
+- **Primer día.** En Hoy, el panel muestra una lista con los datos que faltan para que todo funcione (Yape, horarios, hora de la clase de prueba, puntos en el mapa, personal, etc.) y a qué parte de Ajustes ir. Desaparece sola cuando está completo.
+- **Si Meta rechaza envíos** (token vencido, plantilla sin aprobar, cuenta restringida), en Hoy aparece un aviso rojo con la causa en palabras simples y el botón «Pedir ayuda». Se quita solo cuando vuelve a enviar.
+- **Sin señal en la cancha.** Las marcas de asistencia se guardan en el celular y se envían solas cuando vuelve internet; el panel muestra cuántas están pendientes.
+- **Privacidad.** La web tiene una página `/privacidad` que explica qué datos se guardan y cómo pedir que se borren (Ley 29733). Conviene enlazarla desde la página de Facebook.
+
 ## Si algo falla
 
 | Síntoma | Causa probable | Qué hacer |

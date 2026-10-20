@@ -195,7 +195,7 @@ ${preguntas.length ? `<section class="s" id="preguntas" aria-labelledby="t-preg"
 <a class="btn wa" href="${wa("Hola, quiero una clase de prueba gratis")}">${ICONO_WA}Escribir por WhatsApp</a></div></section>
 
 </main>
-<footer><div class="wrap"><span>${esc(cfg.escuela)}</span>${w.facebook ? `<a href="${esc(w.facebook)}" target="_blank" rel="noopener">Facebook</a>` : ""}${w.instagram ? `<a href="${esc(w.instagram)}" target="_blank" rel="noopener">Instagram</a>` : ""}<span>Lima Norte, Perú</span></div></footer>
+<footer><div class="wrap"><span>${esc(cfg.escuela)}</span><a href="/privacidad">Privacidad</a>${w.facebook ? `<a href="${esc(w.facebook)}" target="_blank" rel="noopener">Facebook</a>` : ""}${w.instagram ? `<a href="${esc(w.instagram)}" target="_blank" rel="noopener">Instagram</a>` : ""}<span>Lima Norte, Perú</span></div></footer>
 <div class="fijo" role="complementary" aria-label="Acceso rápido"><a class="btn wa" href="${wa("Hola, quiero una clase de prueba gratis")}">${ICONO_WA}Pedir clase de prueba gratis</a></div>
 </body></html>`;
 }

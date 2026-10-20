@@ -184,6 +184,14 @@ CREATE TABLE IF NOT EXISTS campana_envios (
   PRIMARY KEY (campana, lead_id)
 );
 
+-- Intentos de entrar al panel (para frenar la fuerza bruta)
+CREATE TABLE IF NOT EXISTS intentos (
+  clave TEXT PRIMARY KEY,         -- ip o nombre
+  fallos INTEGER NOT NULL DEFAULT 0,
+  bloqueado_hasta TEXT,
+  actualizado TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS mensajes_procesados (
   id TEXT PRIMARY KEY,
   creado TEXT NOT NULL

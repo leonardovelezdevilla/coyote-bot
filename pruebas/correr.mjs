@@ -6,7 +6,7 @@ import { spawn, execSync } from "node:child_process";
 import { setTimeout as esperar } from "node:timers/promises";
 import { readFileSync, writeFileSync } from "node:fs";
 const dir = new URL(".", import.meta.url).pathname;
-const ORDEN = ["prueba-completa", "prueba-chats", "prueba-entender", "prueba-lista", "prueba-persona", "prueba-mejoras", "prueba-modulos", "prueba-personal", "prueba-ronda3"];
+const ORDEN = ["prueba-completa", "prueba-chats", "prueba-entender", "prueba-lista", "prueba-persona", "prueba-mejoras", "prueba-modulos", "prueba-personal", "prueba-ronda3", "prueba-ronda4"];
 execSync("rm -rf .wrangler && npx wrangler d1 execute coyote-bot --local --file=schema.sql", { stdio: "ignore" });
 const mock = spawn("node", [dir + "mock.mjs"], { stdio: "ignore" });
 const dev = spawn("npx", ["wrangler", "dev", "--local", "--test-scheduled", "--port", "8787"], { stdio: "ignore" });

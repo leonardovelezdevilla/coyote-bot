@@ -16,6 +16,7 @@ import { resumenCampanas, enviarTanda, avisoSede, cuantosEnSede } from "./campan
 import { panelHTML, entrarHTML } from "./panel.js";
 import { webHTML } from "./web.js";
 import { carnetHTML, nuevoToken, qrSVG } from "./carnet.js";
+import { privacidadHTML } from "./privacidad.js";
 import { ICONO_192, ICONO_512 } from "./iconos.js";
 import { ahoraISO } from "./fechas.js";
 
@@ -24,8 +25,32 @@ const enc = new TextEncoder();
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
+// Cabeceras de seguridad para todas las páginas: nadie puede meter el panel en un iframe,
+// solo se cargan scripts propios y fuentes de Google, y la cámara/micrófono solo en el panel.
+const SEGURIDAD = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'",
+};
 const html = (cuerpo, status = 200, extra = {}) =>
-  new Response(cuerpo, { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", ...extra } });
+  new Response(cuerpo, { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", ...SEGURIDAD, ...extra } });
+
+// Fuerza bruta en /entrar: 8 fallos seguidos por IP o por nombre → 15 minutos de espera
+async function intentoPermitido(env, clave) {
+  const r = await env.DB.prepare("SELECT fallos, bloqueado_hasta FROM intentos WHERE clave = ?").bind(clave).first();
+  return !(r?.bloqueado_hasta && r.bloqueado_hasta > ahoraISO());
+}
+async function anotarFallo(env, clave) {
+  const r = await env.DB.prepare("SELECT fallos FROM intentos WHERE clave = ?").bind(clave).first();
+  const fallos = (r?.fallos || 0) + 1;
+  const bloqueo = fallos >= 8 ? new Date(Date.now() + 15 * 60e3).toISOString() : null;
+  await env.DB.prepare("INSERT INTO intentos (clave, fallos, bloqueado_hasta, actualizado) VALUES (?, ?, ?, ?) ON CONFLICT(clave) DO UPDATE SET fallos = excluded.fallos, bloqueado_hasta = excluded.bloqueado_hasta, actualizado = excluded.actualizado")
+    .bind(clave, bloqueo ? 0 : fallos, bloqueo, ahoraISO()).run();
+  return !!bloqueo;
+}
+const limpiarFallos = (env, clave) => env.DB.prepare("DELETE FROM intentos WHERE clave = ?").bind(clave).run().catch(() => {});
 
 // ---------- Sesión ----------
 
@@ -257,7 +282,7 @@ const horaLimaTxt = () => { const d = new Date(Date.now() - 5 * 3600e3); return 
 // Administrativo de sede: además registra ventas (paquetes publicados), cobra y anota en caja.
 const vende = (sesion) => sesion.rol === "admin" || sesion.cargo === "Administrativo de sede";
 function permitidoPersonal(m, p, sesion) {
-  if (m === "GET" && ["/api/leads", "/api/config", "/api/asistencia", "/api/jornada", "/api/uniformes"].includes(p)) return true;
+  if (m === "GET" && ["/api/leads", "/api/config", "/api/asistencia", "/api/jornada", "/api/uniformes", "/api/estado"].includes(p)) return true;
   if (m === "POST" && /^\/api\/leads\/\d+\/uniforme$/.test(p)) return true;
   if (m === "POST" && ["/api/leads", "/api/asistencia/escanear", "/api/jornada"].includes(p)) return true;
   if (m === "PUT" && p === "/api/asistencia") return true;
@@ -496,6 +521,27 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
     let enviado = false;
     if (l.wa_id && ventanaAbierta(l)) { const cfg = await cargarConfig(env); enviado = await wa.texto(env, l.wa_id, cfg.textos.carnet.replace(/\{enlace\}/g, enlace), "katy"); }
     return json({ ok: true, enlace, enviado });
+  }
+
+  // Estado del sistema: errores de WhatsApp y qué falta configurar (lista de «primer día»)
+  if (ruta === "/api/estado" && m === "GET") {
+    const cfg = await cargarConfig(env);
+    const err = await leerValor(env, "error_whatsapp");
+    let errorWA = null; try { errorWA = err ? JSON.parse(err) : null; } catch { errorWA = null; }
+    const faltan = [];
+    if (sesion.rol === "admin") {
+      if (!cfg.pago?.numero) faltan.push({ que: "El Yape o Plin de la escuela", donde: "Ajustes → Cuenta de la escuela para pagos" });
+      if (!cfg.web?.numero) faltan.push({ que: "El número de WhatsApp del bot para la página web", donde: "Ajustes → Página web" });
+      for (const id of SEDE_IDS) if (cfg.sedes[id]?.activa && !cfg.sedes[id].horario) faltan.push({ que: `El horario de ${cfg.sedes[id].nombre}`, donde: "Ajustes → Horarios y direcciones" });
+      if (!cfg.clasePrueba?.hora) faltan.push({ que: "La hora de la clase de prueba", donde: "Ajustes → Clase de prueba gratis" });
+      for (const id of SEDE_IDS) if (cfg.sedes[id]?.activa && !cfg.sedes[id].coordenadas) faltan.push({ que: `El punto en el mapa de ${cfg.sedes[id].nombre}`, donde: "Ajustes → Opciones avanzadas → Sedes" });
+      if (!cfg.web?.inicio) faltan.push({ que: "El primer día del verano", donde: "Ajustes → Página web" });
+      if (!cfg.avisos?.numero) faltan.push({ que: "Tu WhatsApp para los avisos", donde: "Ajustes → Avisos a tu WhatsApp" });
+      const np = (await env.DB.prepare("SELECT COUNT(*) n FROM personal WHERE activo = 1").first())?.n || 0;
+      if (!np) faltan.push({ que: "Los profesores de cada sede, con su PIN", donde: "Ajustes → Personal de las sedes" });
+      if (!cfg.soporte?.whatsapp) faltan.push({ que: "El WhatsApp de quien te ayuda con el panel", donde: "Ajustes → Opciones avanzadas → Ayuda técnica" });
+    }
+    return json({ errorWA, faltan });
   }
 
   // Uniformes: stock por talla y entregas
@@ -765,20 +811,28 @@ export default {
     if (p === "/entrar" && req.method === "GET") return html(entrarHTML(""));
     if (p === "/entrar" && req.method === "POST") {
       const form = await req.formData();
-      const clave = String(form.get("clave") || "").trim();
-      const nombre = String(form.get("nombre") || "").trim();
+      const clave = String(form.get("clave") || "").trim().slice(0, 100);
+      const nombre = String(form.get("nombre") || "").trim().slice(0, 60);
+      const ip = req.headers.get("CF-Connecting-IP") || "desconocida";
+      const claveIntento = nombre ? `n:${nombre.toLowerCase()}` : `ip:${ip}`;
+      if (!(await intentoPermitido(env, `ip:${ip}`)) || !(await intentoPermitido(env, claveIntento))) {
+        return html(entrarHTML("Demasiados intentos. Espera 15 minutos y vuelve a probar.", nombre ? "personal" : "admin"), 429);
+      }
       if (nombre) { // personal: nombre + PIN
         const h = env.ADMIN_PASSWORD ? await hashPin(env, clave) : "";
         const p = await env.DB.prepare("SELECT id, nombre FROM personal WHERE lower(nombre) = lower(?) AND pin_hash = ? AND activo = 1").bind(nombre, h).first();
-        if (!p) { await new Promise((r) => setTimeout(r, 800)); return html(entrarHTML("El nombre o el PIN no coinciden. Pídele a Katy que revise tu acceso.", "personal"), 401); }
+        if (!p) { await anotarFallo(env, `ip:${ip}`); await anotarFallo(env, claveIntento); await new Promise((r) => setTimeout(r, 800)); return html(entrarHTML("El nombre o el PIN no coinciden. Pídele a Katy que revise tu acceso.", "personal"), 401); }
+        ctx.waitUntil(limpiarFallos(env, claveIntento));
         ctx.waitUntil(env.DB.prepare("UPDATE personal SET ultimo_ingreso = ? WHERE id = ?").bind(ahoraISO(), p.id).run());
         ctx.waitUntil(anotar(env, p.nombre, "entró al panel"));
         return new Response(null, { status: 303, headers: { Location: "/panel", "Set-Cookie": await cookieSesion(env, url, "personal", p.id) } });
       }
       if (!env.ADMIN_PASSWORD || !igualSeguro(clave, env.ADMIN_PASSWORD)) {
+        await anotarFallo(env, `ip:${ip}`);
         await new Promise((r) => setTimeout(r, 800));
         return html(entrarHTML("La clave no es correcta. Revisa mayúsculas y vuelve a intentar."), 401);
       }
+      ctx.waitUntil(limpiarFallos(env, `ip:${ip}`));
       ctx.waitUntil(guardarValor(env, "url_panel", `${url.origin}/panel`));
       return new Response(null, { status: 303, headers: { Location: "/panel", "Set-Cookie": await cookieSesion(env, url) } });
     }
@@ -809,11 +863,13 @@ export default {
       return html(carnetHTML(cfg, l, `${url.origin}/carnet/${l.token}`, { quedan, usadas: l.clases_usadas }), 200, { "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex" });
     }
 
+    if (p === "/privacidad") return new Response(privacidadHTML(await cargarConfig(env)), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300", ...SEGURIDAD } });
+
     // Página pública de la escuela
     if (p === "/" || p === "/web") {
       const cfg = await cargarConfig(env);
       if (!cfg.web?.activa) return new Response(null, { status: 303, headers: { Location: "/entrar" } });
-      return new Response(webHTML(cfg, url.searchParams.get("de") || "web"), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin" } });
+      return new Response(webHTML(cfg, url.searchParams.get("de") || "web"), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60", ...SEGURIDAD, "X-Frame-Options": "SAMEORIGIN" } });
     }
 
     if (p === "/panel" || p.startsWith("/api/")) {

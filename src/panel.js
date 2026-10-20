@@ -285,6 +285,20 @@ function appBase() {
   window.ico = (n) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ""}</svg>`;
   document.querySelectorAll("nav button").forEach((b) => b.insertAdjacentHTML("afterbegin", window.ico(b.dataset.i)));
   window.boton = (txt, clase, icono) => { const b = el("button", { type: "button", className: "btn " + (clase || "") }); b.innerHTML = (icono ? ico(icono) : "") + esc(txt); return b; };
+  // Sin señal en la cancha: las marcas de asistencia se guardan y se envían cuando vuelve internet
+  const PEND = "coyote_pendientes";
+  const leerPend = () => { try { return JSON.parse(localStorage.getItem(PEND) || "[]"); } catch { return []; } };
+  const guardarPend = (l) => { try { localStorage.setItem(PEND, JSON.stringify(l)); } catch {} };
+  window.encolar = (m, u, b) => { const l = leerPend(); l.push({ m, u, b, t: Date.now() }); guardarPend(l); window.pintarPendientes(); };
+  window.pintarPendientes = () => { const n = leerPend().length; let p = document.getElementById("pendientes"); if (!n) { if (p) p.remove(); return; } if (!p) { p = el("div", { id: "pendientes", className: "aviso", role: "status" }); document.querySelector(".wrap").prepend(p); } p.textContent = `${n} ${n === 1 ? "marca guardada" : "marcas guardadas"} sin señal. Se enviarán solas cuando vuelva internet.`; };
+  window.enviarPendientes = async () => {
+    let l = leerPend(); if (!l.length || !navigator.onLine) return;
+    const quedan = [];
+    for (const x of l) { try { await fetch(x.u, { method: x.m, headers: { "Content-Type": "application/json" }, body: JSON.stringify(x.b) }); } catch { quedan.push(x); } }
+    guardarPend(quedan); window.pintarPendientes(); if (quedan.length < l.length) avisoRapido("Se enviaron las marcas guardadas");
+  };
+  window.addEventListener("online", () => window.enviarPendientes());
+  setInterval(() => window.enviarPendientes(), 30000);
   window.api = async (m, u, b) => {
     const r = await fetch(u, { method: m, headers: { "Content-Type": "application/json" }, body: b ? JSON.stringify(b) : undefined });
     if (r.status === 401) { location.href = "/entrar"; throw new Error("Tu sesión terminó"); }
@@ -519,6 +533,17 @@ function appPersonas() {
     if (personal) {
       const t2 = el("p", { className: "gris" }, `Ves solo ${window.DATOS.sesion.sede ? "la sede " + sedeNombre(window.DATOS.sesion.sede) : "todas las sedes"}. Lo que anotes queda registrado a tu nombre.`); t2.style.marginTop = "-16px"; v.append(t2);
     }
+    window.pintarPendientes();
+    api("GET", "/api/estado").then((e) => {
+      if (e.errorWA) { const a = el("div", { className: "aviso", role: "alert" }); a.style.background = "var(--rojo-suave)"; a.innerHTML = `<span><b>El bot no puede enviar mensajes.</b> ${esc(e.errorWA.motivo)}</span>`; const b = boton("Pedir ayuda", "principal"); b.onclick = () => window.irA("ayuda"); a.append(b); t.after(a); }
+      if (e.faltan && e.faltan.length) {
+        const s = el("details", { className: "mas", id: "primerDia" }); s.open = e.faltan.length >= 3;
+        const sum = el("summary"); sum.innerHTML = ico("ajustes") + `&nbsp;Para que todo funcione faltan ${e.faltan.length} ${e.faltan.length === 1 ? "dato" : "datos"}`; s.append(sum);
+        const ul = el("ul", { className: "pasos" }); ul.style.marginTop = "12px"; e.faltan.forEach((f) => { const li = el("li"); li.innerHTML = `<b>${esc(f.que)}</b><br><span class="gris">${esc(f.donde)}</span>`; ul.append(li); }); s.append(ul);
+        const b = boton("Ir a Ajustes", "principal", "ajustes"); b.onclick = () => window.irA("ajustes"); s.append(b);
+        const m2 = v.querySelector(".marcador"); if (m2) m2.after(s);
+      }
+    }).catch(() => {});
     if (A.esperando && !personal) {
       const a = el("div", { className: "aviso" }); a.style.background = "var(--rojo-suave)";
       a.append(el("span", {}, A.esperando === 1 ? "1 chat espera tu respuesta." : `${A.esperando} chats esperan tu respuesta.`));
@@ -691,7 +716,7 @@ function appPersonas() {
           const acc = el("span", { className: "acc" }); acc.style.flexWrap = "nowrap";
           const bV = boton("Vino", a.presente === 1 ? "exito" : "", "ok"), bF = boton("Faltó", a.presente === 0 ? "principal" : "", "no");
           bV.style.minHeight = bF.style.minHeight = "44px";
-          const marcar = async (p) => { const nuevo = a.presente === p ? null : p; try { await api("PUT", "/api/asistencia", { lead_id: a.id, fecha, presente: nuevo }); a.presente = nuevo; pintarL(); } catch (e) { avisoRapido(e.message); } };
+          const marcar = async (p) => { const nuevo = a.presente === p ? null : p; try { await api("PUT", "/api/asistencia", { lead_id: a.id, fecha, presente: nuevo }); } catch (e) { if (e.message && /conexión/.test(e.message) || !navigator.onLine) { window.encolar("PUT", "/api/asistencia", { lead_id: a.id, fecha, presente: nuevo }); avisoRapido("Sin señal: la marca se guardó y se enviará sola"); } else { avisoRapido(e.message); return; } } a.presente = nuevo; pintarL(); };
           bV.onclick = () => marcar(1); bF.onclick = () => marcar(0);
           acc.append(bV, bF); f.append(quien, acc); lista.append(f);
         });

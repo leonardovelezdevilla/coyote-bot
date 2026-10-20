@@ -63,6 +63,23 @@ function resumen(carga) {
   }
 }
 
+// Si Meta rechaza envíos (token vencido, número bloqueado, plantilla pausada), el panel muestra un aviso
+async function anotarError(env, status, detalle) {
+  try {
+    let motivo = `WhatsApp respondió ${status}.`;
+    if (status === 401 || /190|access token/i.test(detalle)) motivo = "El token de WhatsApp venció o no es válido. Hay que generar uno nuevo en Meta y guardarlo con «wrangler secret put WHATSAPP_TOKEN».";
+    else if (/131026|131047|not.*template|132001/i.test(detalle)) motivo = "Una plantilla no está aprobada o su nombre no coincide con el de Meta. Revisa Ajustes → Plantillas de Meta.";
+    else if (/131031|account.*restrict|blocked/i.test(detalle)) motivo = "Meta restringió la cuenta o el número. Revisa el estado en WhatsApp Manager.";
+    else if (/131030|not in allowed list/i.test(detalle)) motivo = "El número de destino no está en la lista de prueba de Meta (solo pasa con el número de prueba).";
+    else if (/130429|throughput|rate/i.test(detalle)) return; // temporal, no vale la pena avisar
+    await env.DB.prepare("INSERT INTO ajustes (clave, valor, actualizado) VALUES ('error_whatsapp', ?, ?) ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor, actualizado = excluded.actualizado")
+      .bind(JSON.stringify({ motivo, status, cuando: new Date().toISOString(), detalle: String(detalle).slice(0, 300) }), new Date().toISOString()).run();
+  } catch { /* nada */ }
+}
+async function limpiarError(env) {
+  try { await env.DB.prepare("DELETE FROM ajustes WHERE clave = 'error_whatsapp'").run(); } catch { /* nada */ }
+}
+
 export async function registrar(env, waId, autor, tipo, texto, mediaId = null, wamid = null) {
   try {
     await env.DB.prepare("INSERT INTO mensajes (wa_id, autor, tipo, texto, media_id, wamid, creado) VALUES (?, ?, ?, ?, ?, ?, ?)")
@@ -80,9 +97,12 @@ async function enviar(env, para, cargaCompleta, autor = "bot") {
     body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to: para, ...carga }),
   });
   if (!r.ok) {
-    console.log("WhatsApp rechazó el envío", r.status, await r.text());
+    const detalle = await r.text();
+    console.log("WhatsApp rechazó el envío", r.status, detalle);
+    await anotarError(env, r.status, detalle);
     return false;
   }
+  await limpiarError(env);
   // Los avisos a Katy no se guardan en el chat de nadie
   if (!__sinHistorial) {
     const { tipo, texto } = resumen(carga);

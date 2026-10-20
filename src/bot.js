@@ -903,6 +903,8 @@ export async function enviarResumen(env, urlPanel) {
   const nuevas = await q("SELECT COUNT(*) n FROM leads WHERE archivado = 0 AND creado >= ?", ayer);
   const chats = await q("SELECT COUNT(*) n FROM leads WHERE archivado = 0 AND atencion = 'humano' AND no_leidos > 0");
   const comprobantes = await q("SELECT COUNT(*) n FROM leads WHERE archivado = 0 AND comprobante IS NOT NULL");
+  const tardes = await q("SELECT COUNT(*) n FROM jornadas WHERE fecha = ? AND tarde = 1", sumarDias(hoy, -1));
+  if (tardes) partes.push(`ayer ${tardes === 1 ? "un profesor llegó" : tardes + " profesores llegaron"} tarde`);
   const cuotas = await q("SELECT COUNT(*) n FROM leads WHERE archivado = 0 AND saldo > 0 AND cuota_vence <= ?", hoy);
   const partes = [];
   if (cuotas) partes.push(`${cuotas} ${cuotas === 1 ? "cuota vencida" : "cuotas vencidas"} por cobrar`);
@@ -937,6 +939,7 @@ export async function limpiar(env) {
   const haceUnAno = new Date(Date.now() - 365 * 86400e3).toISOString();
   await env.DB.prepare("DELETE FROM mensajes WHERE creado < ?").bind(haceUnAno).run();
   await env.DB.prepare("DELETE FROM no_entendidos WHERE creado < ?").bind(new Date(Date.now() - 90 * 86400e3).toISOString()).run();
+  await env.DB.prepare("DELETE FROM intentos WHERE actualizado < ?").bind(new Date(Date.now() - 86400e3).toISOString()).run();
   await env.DB.prepare("DELETE FROM bitacora WHERE creado < ?").bind(new Date(Date.now() - 180 * 86400e3).toISOString()).run();
   return { ok: true };
 }
