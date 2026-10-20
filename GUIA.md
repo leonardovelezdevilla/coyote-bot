@@ -12,7 +12,7 @@ Al terminar esta guía queda funcionando:
    - la palabra **BAJA**, que saca a esa persona de las promociones.
 3. **El panel de Katy**, una página con clave que funciona como app en el celular. Tiene la pantalla Hoy, los **Chats** (Katy responde desde ahí con el mismo número del bot), la lista de personas, los números, los mensajes a grupos y los ajustes del bot, sin tocar código. Reemplaza al «Registro Verano Coyote».
 
-Tiempo estimado: 2 a 3 horas la primera vez, más la espera de aprobación de las plantillas en Meta (de horas a un par de días). Las plantillas son 9 en total (paso 6).
+Tiempo estimado: 2 a 3 horas la primera vez, más la espera de aprobación de las plantillas en Meta (de horas a un par de días). Las plantillas son 12 en total (paso 6); la 12 solo hace falta si se enciende la lista de espera automática.
 
 ---
 
@@ -180,6 +180,24 @@ Botones: **Sí, renovar** · **Tengo una duda**
 Ejemplos: Rosa · 2
 Botones: **Todo bien, volvemos** · **Quiero conversar**
 
+**10. `recordatorio_pago`** · Utilidad. Recordatorio del saldo de una cuota.
+> Hola {{1}}, te recordamos que el saldo de {{2}} de la inscripción en la Escuela Coyote vence {{3}}. Puedes pagarlo por Yape o Plin y enviarnos la captura por aquí.
+
+Ejemplos: Rosa · S/ 100 · el 15 de enero
+Botones: **Ya pagué** · **Tengo una duda**
+
+**11. `encuesta_satisfaccion`** · Marketing. A las 4 semanas de inscrito.
+> Hola {{1}}, ¿cómo le está yendo a tu hijo(a) en la Escuela Coyote? Tu opinión nos ayuda a mejorar.
+
+Ejemplos: Rosa
+Botones: **Muy bien** · **Bien** · **Regular**
+
+**12. `cupo_liberado`** · Utilidad. Solo si se enciende la lista de espera automática (apagada por ahora).
+> Hola {{1}}, se liberó un cupo en la sede {{2}} de la Escuela Coyote. ¿Lo tomas?
+
+Ejemplos: Rosa · San Martín de Porres
+Botones: **Sí, lo tomo** · **Ya no**
+
 **9. `aviso_sede`** · Utilidad. Avisos del día a toda una sede («no hay clase por lluvia»).
 > Aviso de la Escuela Coyote, sede {{1}}: {{2}}
 
@@ -228,6 +246,10 @@ Mientras una plantilla no esté aprobada, ese mensaje no sale. El resto del bot 
 | Cada hora, de 8 a. m. a 9 p. m. | Retoma conversaciones que quedaron a medias hace unas 20 horas, una sola vez por persona. Va dentro de las 24 horas de WhatsApp, así que no usa plantilla. |
 | 8 a. m. | Resumen para Katy: chats por responder, comprobantes por revisar, clases de prueba, consultas nuevas. Los lunes incluye la semana anterior en números. |
 | 10 a. m. | Invitación a renovar a los inscritos cuyas clases pagadas terminan en 5 días o menos (una sola vez por ciclo). |
+| 10 a. m. | Recordatorio de cuota: 2 días antes del vencimiento y el mismo día. |
+| 11 a. m. | Encuesta de satisfacción a quienes cumplen 4 semanas de inscritos. |
+| Día 1, 9 a. m. | Resumen del mes anterior a Katy (y a un número extra si se configura). |
+| Domingos, 4 a. m. | Copia de seguridad de toda la base en el depósito de Cloudflare. |
 | 12 m. | Mensaje «te extrañamos» a los papás de inscritos con 2 faltas seguidas en la lista de asistencia (una vez por racha). |
 | De 10 a. m. a 8 p. m. | Recordatorios para quienes tienen clase al día siguiente, por tandas. |
 | De 11 a. m. a 7 p. m. | Seguimiento para quienes tuvieron clase ayer. |
@@ -262,6 +284,20 @@ La dirección del bot sin `/panel` (por ejemplo `https://coyote-bot.TU-NOMBRE.wo
 - **Qué puede vender el personal:** solo el paquete de verano y el ciclo de 12 clases, al precio publicado. Los planes a medida y otros montos los registra Katy (se puede permitir al personal con un interruptor en esa misma sección).
 - **Qué puede hacer el personal:** ver las personas de su sede (con los celulares ocultos), pasar lista y escanear carnets, registrar ventas en la cancha, anotar gastos de su sede y agregar notas. **No puede:** ver chats, cambiar Ajustes, ver Números ni otras sedes, borrar personas ni descargar listas. Todo lo que hace queda a su nombre en **Ajustes → Personal → Quién hizo qué**. «Quitar acceso» lo saca al instante.
 - **Venta en la cancha.** En **Hoy → Registrar una venta en la cancha**: nombre, celular (opcional), edad, plan (verano, ciclo u otro), monto y cómo pagó. La persona queda inscrita, el pago entra en Caja con quién lo registró y se crea su carnet QR. Si dejó celular, el bot le envía el carnet cuando escriba (WhatsApp no deja iniciar la conversación sin plantilla); mientras tanto se puede abrir, mostrar o imprimir desde el panel.
+
+## Personal: entrada y salida, y pago del mes
+
+- Cada sede tiene un **QR fijo** (Ajustes → Personal → «QR Los Olivos», etc.). Katy lo imprime y lo pega en la cancha. El profesor lo escanea desde su panel («Marcar mi entrada» / «Marcar mi salida»); si hay hora de inicio configurada para la sede, se marca la tardanza.
+- En la ficha de cada persona del personal, Katy pone la **tarifa** («25 clase», «15 hora» o «900 mes»). Con las jornadas del mes, el panel calcula el pago y «Registrar pago» lo anota en Caja como gasto de Profesores.
+- Hay dos cargos: **Profesor/Asistente** (pasa lista, escanea, marca su jornada; no ve dinero) y **Administrativo de sede** (además vende los paquetes publicados, cobra cuotas y uniformes y anota gastos de su sede).
+
+## Cuotas, encuesta, referidos y uniformes
+
+- **Cuotas.** Al inscribir, Katy indica cuánto pagó y cuánto queda debiendo y hasta cuándo. El bot recuerda 2 días antes y el día del vencimiento; la ficha, el carnet y Hoy → «Cuotas por cobrar» lo muestran. «Cobró la cuota» registra el pago en Caja. Solo Katy vende en cuotas.
+- **Encuesta.** A las 4 semanas de inscrito, tres botones. «Regular» pasa el chat a Katy con aviso. Resultados por sede en Números.
+- **Referidos.** El código del carnet es el código para recomendar. Quien escribe al bot con un código queda vinculado a esa familia (origen «Referido») y recibe el texto del beneficio. Números muestra quién trae familias; el beneficio lo aplica Katy a mano.
+- **Uniformes.** En Números: stock por talla (las tallas se definen en Ajustes). Desde la ficha, «Entregó uniforme» registra talla, descuenta stock y, si corresponde, cobra.
+- **Alerta de cupos.** Cuando una sede llega al porcentaje configurado (80 %) y cuando se llena, Katy recibe un aviso, una sola vez por nivel.
 
 ## Carnet QR, Caja y avisos a una sede
 
