@@ -24,7 +24,7 @@ console.log(fallas ? `\n${fallas} prueba(s) fallaron` : "\nTodas las pruebas de 
 // ---------- Fuerza bruta y cabeceras ----------
 {
   let ultimo = 0;
-  for (let i = 0; i < 9; i++) { const w2 = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "Nadie Real", clave: "0000" }), redirect: "manual" }); ultimo = w2.status; }
+  for (let i = 0; i < 9; i++) { const w2 = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "Nadie Real", clave: "000000" }), redirect: "manual" }); ultimo = w2.status; }
   ok(ultimo === 429, "Tras 8 PIN equivocados seguidos, la entrada se bloquea 15 minutos (429)");
   const w3 = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ clave: "clave-panel" }), redirect: "manual" });
   ok(w3.status === 429 || w3.status === 303, "El bloqueo es por IP o por nombre, y expira solo");

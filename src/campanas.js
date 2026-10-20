@@ -67,7 +67,7 @@ export async function cuantosEnSede(env, sede) {
 }
 
 export async function enviarTanda(env, id) {
-  const c = CAMPANAS[id];
+  const c = Object.hasOwn(CAMPANAS, id) ? CAMPANAS[id] : null;
   if (!c) return { error: "Campaña no encontrada" };
   const cfg = await cargarConfig(env);
   const { results } = await env.DB.prepare(`SELECT l.* ${BASE} AND ${c.filtro} ${NO_ENVIADO} LIMIT ?`).bind(id, TANDA).all();

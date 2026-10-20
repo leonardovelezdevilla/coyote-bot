@@ -11,18 +11,18 @@ const katy = api(cookieK);
 const hoy = new Date(Date.now() - 5 * 3600e3).toISOString().slice(0, 10);
 
 // Katy agrega personal
-let r = await katy("POST", "/api/personal", { nombre: "Carlos Quispe", rol: "Administrativo de sede", sede: "LO", pin: "4821" });
+let r = await katy("POST", "/api/personal", { nombre: "Carlos Quispe", rol: "Administrativo de sede", sede: "LO", pin: "482139" });
 ok(r.status === 201, "Katy agrega a Carlos Quispe (Administrativo de sede, Los Olivos) con PIN");
-ok((await katy("POST", "/api/personal", { nombre: "Ana", pin: "12" })).status === 400, "PIN corto → error claro");
-ok((await katy("POST", "/api/personal", { nombre: "carlos quispe", pin: "9999" })).status === 409, "Nombre repetido → error claro");
-ok(!sql("SELECT pin_hash FROM personal")[0].pin_hash.includes("4821"), "El PIN no se guarda en texto plano");
+ok((await katy("POST", "/api/personal", { nombre: "Ana", pin: "1234" })).status === 400, "PIN corto → error claro");
+ok((await katy("POST", "/api/personal", { nombre: "carlos quispe", pin: "999999" })).status === 409, "Nombre repetido → error claro");
+ok(!sql("SELECT pin_hash FROM personal")[0].pin_hash.includes("482139") && sql("SELECT pin_sal FROM personal")[0].pin_sal, "El PIN no se guarda en texto plano (con sal propia)");
 
 // Carlos entra
-let w = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "Carlos Quispe", clave: "0000" }), redirect: "manual" });
+let w = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "Carlos Quispe", clave: "000000" }), redirect: "manual" });
 ok(w.status === 401 && /no coinciden/.test(await w.text()), "PIN equivocado → no entra, mensaje claro");
-w = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "carlos quispe", clave: "4821" }), redirect: "manual" });
+w = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "carlos quispe", clave: "482139" }), redirect: "manual" });
 const cookieC = (w.headers.get("set-cookie") || "").split(";")[0];
-ok(w.status === 303 && /\.personal\.\d+\./.test(cookieC), "Carlos entra con nombre y PIN (sin importar mayúsculas)");
+ok(w.status === 303 && /^coyote_sesion=[a-f0-9]{32}\./.test(cookieC), "Carlos entra con nombre y PIN (sin importar mayúsculas)");
 const carlos = api(cookieC);
 const h = await (await fetch(BOT + "/panel", { headers: { Cookie: cookieC } })).text();
 ok(/Carlos Quispe · Los Olivos/.test(h) && !/data-v="chats"/.test(h) && !/data-v="ajustes"/.test(h) && /data-v="caja"/.test(h), "Su panel muestra su nombre y sede, sin Chats ni Ajustes, con Caja");
@@ -40,6 +40,7 @@ ok((await carlos("PATCH", "/api/leads/" + otraSede.id, { nota: "x" })).status ==
 const miSede = sql("SELECT id FROM leads WHERE sede='LO' AND estado!='inscrito' LIMIT 1")[0];
 ok((await carlos("PATCH", "/api/leads/" + miSede.id, { archivado: 1 })).status === 403, "No puede quitar personas de la lista");
 ok((await carlos("PATCH", "/api/leads/" + miSede.id, { nota: "Prefiere turno tarde" })).status === 200, "Sí puede agregar una nota en su sede");
+ok((await carlos("PATCH", "/api/leads/" + miSede.id, { monto: 1 })).status === 403, "No puede cambiar un monto suelto");
 
 // Venta en la cancha (Carlos)
 r = await carlos("POST", "/api/ventas", { padre: "Marisol Huamán", wa_id: "987 111 222", edad: "9 años", sede: "SMP", plan: "ciclo", monto: 140, metodo: "Efectivo" });
@@ -69,8 +70,8 @@ ok(r.data.some((b) => b.autor === "Carlos Quispe" && b.accion === "venta en la c
 const idC = sql("SELECT id FROM personal WHERE nombre='Carlos Quispe'")[0].id;
 await katy("PATCH", "/api/personal/" + idC, { activo: false });
 ok((await carlos("GET", "/api/leads")).status === 401, "Al quitarle el acceso, su sesión deja de funcionar al instante");
-await katy("PATCH", "/api/personal/" + idC, { activo: true, pin: "5555" });
-w = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "Carlos Quispe", clave: "5555" }), redirect: "manual" });
+await katy("PATCH", "/api/personal/" + idC, { activo: true, pin: "555555" });
+w = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "Carlos Quispe", clave: "555555" }), redirect: "manual" });
 ok(w.status === 303, "Con acceso devuelto y PIN nuevo, vuelve a entrar");
 // Katy también puede vender en la cancha eligiendo sede
 r = await katy("POST", "/api/ventas", { padre: "Venta Katy", sede: "PP", plan: "verano", monto: 250, metodo: "Plin" });
@@ -79,7 +80,7 @@ console.log(fallas ? `\n${fallas} prueba(s) fallaron` : "\nTodas las pruebas de 
 
 // ---------- Solo paquetes publicados para el personal; cuenta de pago de la escuela ----------
 {
-  const w2 = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "Carlos Quispe", clave: "5555" }), redirect: "manual" });
+  const w2 = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "Carlos Quispe", clave: "555555" }), redirect: "manual" });
   const carlos2 = api((w2.headers.get("set-cookie") || "").split(";")[0]);
   let r2 = await carlos2("POST", "/api/ventas", { padre: "Plan raro", plan: "otro", clases: 5, monto: 50, metodo: "Efectivo" });
   ok(r2.status === 403 && /administradora/.test(r2.data.error), "El personal no puede registrar planes a medida");

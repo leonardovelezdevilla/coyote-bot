@@ -196,6 +196,16 @@ export const wa = {
     const { url, mime_type } = await info.json();
     const archivo = await fetch(url, { headers: { Authorization: `Bearer ${env.WHATSAPP_TOKEN}` } });
     if (!archivo.ok) return null;
-    return new Response(archivo.body, { headers: { "Content-Type": mime_type || archivo.headers.get("Content-Type") || "application/octet-stream", "Cache-Control": "private, max-age=86400" } });
+    // Solo imágenes, audio, video y PDF se muestran en el navegador; cualquier otro archivo se descarga
+    // sin ejecutarse (un .html o .svg enviado por un padre no puede correr dentro del panel)
+    const tipo = String(mime_type || archivo.headers.get("Content-Type") || "").split(";")[0].trim();
+    const seguro = /^(image\/(jpeg|png|webp|gif)|audio\/[a-z0-9.+-]+|video\/(mp4|3gpp|quicktime)|application\/pdf)$/.test(tipo);
+    return new Response(archivo.body, { headers: {
+      "Content-Type": seguro ? tipo : "application/octet-stream",
+      "Content-Disposition": seguro ? "inline" : `attachment; filename="archivo-${mediaId}"`,
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "sandbox; default-src 'none'",
+      "Cache-Control": "private, max-age=86400",
+    } });
   },
 };

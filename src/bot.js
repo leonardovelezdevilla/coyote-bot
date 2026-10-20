@@ -344,7 +344,7 @@ export async function atenderMensaje(env, msg, perfil) {
 
   const texto = (msg.text?.body || msg.button?.text || "").trim();
   const respuestaId = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id || msg.button?.payload
-    || (msg.button?.text ? BOTONES_PLANTILLA[msg.button.text.trim().toLowerCase()] : null) || null;
+    || (msg.button?.text && Object.hasOwn(BOTONES_PLANTILLA, msg.button.text.trim().toLowerCase()) ? BOTONES_PLANTILLA[msg.button.text.trim().toLowerCase()] : null) || null;
 
   // Completar con lo que ya sabemos de esta persona (útil si vuelve días después)
   const lead = await env.DB.prepare("SELECT * FROM leads WHERE wa_id = ?").bind(to).first();
@@ -904,9 +904,9 @@ export async function enviarResumen(env, urlPanel) {
   const chats = await q("SELECT COUNT(*) n FROM leads WHERE archivado = 0 AND atencion = 'humano' AND no_leidos > 0");
   const comprobantes = await q("SELECT COUNT(*) n FROM leads WHERE archivado = 0 AND comprobante IS NOT NULL");
   const tardes = await q("SELECT COUNT(*) n FROM jornadas WHERE fecha = ? AND tarde = 1", sumarDias(hoy, -1));
-  if (tardes) partes.push(`ayer ${tardes === 1 ? "un profesor llegó" : tardes + " profesores llegaron"} tarde`);
   const cuotas = await q("SELECT COUNT(*) n FROM leads WHERE archivado = 0 AND saldo > 0 AND cuota_vence <= ?", hoy);
   const partes = [];
+  if (tardes) partes.push(`ayer ${tardes === 1 ? "un profesor llegó" : tardes + " profesores llegaron"} tarde`);
   if (cuotas) partes.push(`${cuotas} ${cuotas === 1 ? "cuota vencida" : "cuotas vencidas"} por cobrar`);
   if (comprobantes) partes.push(`${comprobantes} ${comprobantes === 1 ? "comprobante de pago por revisar" : "comprobantes de pago por revisar"}`);
   if (chats) partes.push(`${chats} ${chats === 1 ? "chat espera" : "chats esperan"} tu respuesta`);

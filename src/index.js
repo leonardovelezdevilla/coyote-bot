@@ -42,47 +42,60 @@ async function intentoPermitido(env, clave) {
   const r = await env.DB.prepare("SELECT fallos, bloqueado_hasta FROM intentos WHERE clave = ?").bind(clave).first();
   return !(r?.bloqueado_hasta && r.bloqueado_hasta > ahoraISO());
 }
+// Contador atómico (una sola sentencia) y bloqueo progresivo: 8 fallos → 15 min, 16 → 1 h, 24 → 24 h
 async function anotarFallo(env, clave) {
-  const r = await env.DB.prepare("SELECT fallos FROM intentos WHERE clave = ?").bind(clave).first();
-  const fallos = (r?.fallos || 0) + 1;
-  const bloqueo = fallos >= 8 ? new Date(Date.now() + 15 * 60e3).toISOString() : null;
-  await env.DB.prepare("INSERT INTO intentos (clave, fallos, bloqueado_hasta, actualizado) VALUES (?, ?, ?, ?) ON CONFLICT(clave) DO UPDATE SET fallos = excluded.fallos, bloqueado_hasta = excluded.bloqueado_hasta, actualizado = excluded.actualizado")
-    .bind(clave, bloqueo ? 0 : fallos, bloqueo, ahoraISO()).run();
-  return !!bloqueo;
+  const r = await env.DB.prepare(
+    "INSERT INTO intentos (clave, fallos, bloqueado_hasta, actualizado) VALUES (?1, 1, NULL, ?2) " +
+    "ON CONFLICT(clave) DO UPDATE SET fallos = intentos.fallos + 1, actualizado = ?2, " +
+    "bloqueado_hasta = CASE WHEN (intentos.fallos + 1) % 8 = 0 THEN strftime('%Y-%m-%dT%H:%M:%fZ', ?2, CASE WHEN intentos.fallos + 1 >= 24 THEN '+24 hours' WHEN intentos.fallos + 1 >= 16 THEN '+1 hour' ELSE '+15 minutes' END) ELSE intentos.bloqueado_hasta END " +
+    "RETURNING bloqueado_hasta",
+  ).bind(clave, ahoraISO()).first();
+  return !!r?.bloqueado_hasta;
 }
 const limpiarFallos = (env, clave) => env.DB.prepare("DELETE FROM intentos WHERE clave = ?").bind(clave).run().catch(() => {});
 
 // ---------- Sesión ----------
 
-async function firmar(env, texto) {
-  const k = await crypto.subtle.importKey("raw", enc.encode("sesion:" + env.ADMIN_PASSWORD), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const s = await crypto.subtle.sign("HMAC", k, enc.encode(texto));
-  return [...new Uint8Array(s)].map((b) => b.toString(16).padStart(2, "0")).join("");
+// Firma con un secreto aleatorio propio (SESSION_SECRET), nunca con la clave de Katy:
+// así ni el QR de la sede ni una cookie sirven para adivinar la contraseña.
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+async function firmar(env, texto, proposito = "sesion") {
+  if (!env.SESSION_SECRET) throw new Error("Falta el secreto SESSION_SECRET (ver GUIA.md, paso 4)");
+  const k = await crypto.subtle.importKey("raw", enc.encode(`${proposito}:${env.SESSION_SECRET}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return hex(await crypto.subtle.sign("HMAC", k, enc.encode(texto)));
 }
 
-// La cookie guarda: vencimiento . rol . id . firma. Rol "admin" es Katy; "personal" es un profesor o asistente.
+// La cookie lleva un id de sesión firmado. La sesión vive en la base: se puede cerrar
+// (todas o una) desde Ajustes, y una cookie robada deja de servir al instante.
 async function sesionValida(req, env) {
-  if (!env.ADMIN_PASSWORD) return null;
-  const m = (req.headers.get("Cookie") || "").match(/(?:^|;\s*)coyote_sesion=(\d+)\.(admin|personal)\.(\d+)\.([a-f0-9]{64})/);
-  if (!m || Number(m[1]) < Date.now()) return null;
-  if (!igualSeguro(await firmar(env, `${m[1]}.${m[2]}.${m[3]}`), m[4])) return null;
-  if (m[2] === "admin") return { rol: "admin", nombre: null, sede: null };
-  const p = await env.DB.prepare("SELECT id, nombre, rol, sede FROM personal WHERE id = ? AND activo = 1").bind(Number(m[3])).first();
-  return p ? { rol: "personal", id: p.id, nombre: p.nombre, cargo: p.rol, sede: p.sede || null } : null;
+  if (!env.ADMIN_PASSWORD || !env.SESSION_SECRET) return null;
+  const m = (req.headers.get("Cookie") || "").match(/(?:^|;\s*)coyote_sesion=([a-f0-9]{32})\.([a-f0-9]{64})/);
+  if (!m || !igualSeguro(await firmar(env, m[1]), m[2])) return null;
+  const s = await env.DB.prepare("SELECT id, rol, personal_id, vence, ultimo_uso FROM sesiones_panel WHERE id = ?").bind(m[1]).first();
+  if (!s || s.vence < ahoraISO()) return null;
+  if (!s.ultimo_uso || Date.parse(s.ultimo_uso) < Date.now() - 3600e3) env.DB.prepare("UPDATE sesiones_panel SET ultimo_uso = ? WHERE id = ?").bind(ahoraISO(), s.id).run().catch(() => {});
+  if (s.rol === "admin") return { rol: "admin", nombre: null, sede: null, sesionId: s.id };
+  const p = await env.DB.prepare("SELECT id, nombre, rol, sede FROM personal WHERE id = ? AND activo = 1").bind(s.personal_id).first();
+  return p ? { rol: "personal", id: p.id, nombre: p.nombre, cargo: p.rol, sede: p.sede || null, sesionId: s.id } : null;
 }
 
-async function cookieSesion(env, url, rol = "admin", id = 0) {
+async function cookieSesion(env, url, rol = "admin", personalId = null) {
   const dias = rol === "admin" ? DIAS_SESION : 30; // el personal vuelve a entrar cada mes
-  const exp = Date.now() + dias * 86400000;
+  const id = hex(crypto.getRandomValues(new Uint8Array(16)));
+  await env.DB.prepare("INSERT INTO sesiones_panel (id, rol, personal_id, vence, creado) VALUES (?, ?, ?, ?, ?)")
+    .bind(id, rol, personalId, new Date(Date.now() + dias * 86400e3).toISOString(), ahoraISO()).run();
   const seguro = url.protocol === "https:" ? "; Secure" : "";
-  const cuerpo = `${exp}.${rol}.${id}`;
-  return `coyote_sesion=${cuerpo}.${await firmar(env, cuerpo)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${dias * 86400}${seguro}`;
+  return `coyote_sesion=${id}.${await firmar(env, id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${dias * 86400}${seguro}`;
 }
+const cookieBorrar = (url) => `coyote_sesion=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${url.protocol === "https:" ? "; Secure" : ""}`;
 
-async function hashPin(env, pin) {
-  const k = await crypto.subtle.digest("SHA-256", enc.encode(`pin:${env.ADMIN_PASSWORD}:${pin}`));
-  return [...new Uint8Array(k)].map((b) => b.toString(16).padStart(2, "0")).join("");
+// PIN del personal: PBKDF2 con sal por persona (lento a propósito para frenar adivinanzas)
+async function hashPin(env, pin, sal) {
+  const base = await crypto.subtle.importKey("raw", enc.encode(`${env.SESSION_SECRET}:${pin}`), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: enc.encode(sal), iterations: 100000 }, base, 256);
+  return hex(bits);
 }
+const nuevaSal = () => hex(crypto.getRandomValues(new Uint8Array(16)));
 
 const anotar = (env, autor, accion, detalle) =>
   env.DB.prepare("INSERT INTO bitacora (autor, accion, detalle, creado) VALUES (?, ?, ?, ?)").bind(autor, accion, detalle ? String(detalle).slice(0, 200) : null, ahoraISO()).run().catch(() => {});
@@ -295,6 +308,8 @@ function permitidoPersonal(m, p, sesion) {
   return false;
 }
 
+const montoValido = (x) => Number.isFinite(Number(x)) && Number(x) > 0 && Number(x) <= 100000;
+
 async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
   const ruta = url.pathname;
   const m = req.method;
@@ -306,12 +321,19 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
       "SELECT l.*, (SELECT COUNT(*) FROM asistencias a WHERE a.lead_id = l.id AND a.presente = 1 AND a.fecha >= COALESCE(l.inscrito_desde, '0000')) AS clases_usadas " +
       `FROM leads l WHERE archivado = 0${soloSede ? " AND sede = ?" : ""} ORDER BY actualizado DESC LIMIT 3000`).bind(...(soloSede ? [soloSede] : [])).all();
     // El personal no ve los celulares completos
-    return json(sesion.rol === "personal" ? results.map((l) => ({ ...l, wa_id: l.wa_id ? l.wa_id.slice(0, 5) + "•••" + l.wa_id.slice(-2) : null })) : results);
+    if (sesion.rol !== "personal") return json(results);
+    const puedeVender = vende(sesion);
+    return json(results.map((l) => {
+      const x = { ...l, wa_id: l.wa_id ? l.wa_id.slice(0, 5) + "•••" + l.wa_id.slice(-2) : null };
+      if (!puedeVender) { delete x.monto; delete x.saldo; delete x.cuota_vence; delete x.comprobante; delete x.comprobante_creado; }
+      return x;
+    }));
   }
   if (ruta === "/api/leads" && m === "POST") {
     const b = await req.json();
     if (soloSede) b.sede = soloSede;
     if (!b.padre || !SEDE_IDS.includes(b.sede)) return json({ error: "Falta el nombre o la sede" }, 400);
+    if (b.wa_id) { let tel = String(b.wa_id).replace(/\D/g, ""); if (/^9\d{8}$/.test(tel)) tel = "51" + tel; if (!/^\d{9,15}$/.test(tel)) return json({ error: "El celular no parece válido" }, 400); b.wa_id = tel; }
     const ahora = ahoraISO();
     ctx.waitUntil(anotar(env, autor, "anotó persona", b.padre));
     try {
@@ -336,7 +358,8 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
     }
     let clases = b.plan === "ciclo" ? 12 : cfg.clasesVerano, semanas = b.plan === "ciclo" ? r.semanasCiclo || 4 : r.semanasVerano || 8;
     if (b.plan === "otro") { clases = Number(b.clases); if (!Number.isInteger(clases) || clases < 1 || clases > 200) return json({ error: "Escribe cuántas clases pagó" }, 400); semanas = Math.ceil(clases / 3) + 1; }
-    const monto = Number(b.monto); if (!(monto >= 0)) return json({ error: "Escribe cuánto pagó" }, 400);
+    const monto = Number(b.monto); if (!(Number.isFinite(monto) && monto >= 0 && monto <= 100000)) return json({ error: "Escribe cuánto pagó" }, 400);
+    b.metodo = String(b.metodo || "").slice(0, 20);
     const saldo = Math.max(0, Number(b.saldo) || 0);
     if (saldo > 0 && (!cfg.cuotas?.permitir || (sesion.rol === "personal" && !cfg.personalPlanesLibres))) return json({ error: "Las ventas en cuotas las registra la administradora" }, 403);
     const cuotaVence = saldo > 0 ? (/^\d{4}-\d{2}-\d{2}$/.test(b.cuota_vence || "") ? b.cuota_vence : sumarDias(limaHoy(), cfg.cuotas?.diasPorDefecto || 15)) : null;
@@ -367,9 +390,11 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
     if (sesion.rol === "personal") {
       const l = await env.DB.prepare("SELECT sede FROM leads WHERE id = ?").bind(Number(mLead[1])).first();
       if (!l || (soloSede && l.sede !== soloSede)) return json({ error: "Esa persona no es de tu sede" }, 403);
-      for (const k of Object.keys(b)) if (!["estado", "monto", "plan", "clases", "nota", "padre", "desde", "pago_cuota", "saldo", "cuota_vence"].includes(k)) return json({ error: "Esa acción es solo para la administradora" }, 403);
+      const permitidas = vende(sesion) ? ["estado", "monto", "plan", "clases", "nota", "padre", "desde", "pago_cuota"] : ["estado", "nota", "padre"];
+      for (const k of Object.keys(b)) if (!permitidas.includes(k)) return json({ error: vende(sesion) ? "Esa acción es solo para la administradora" : "Los cobros los registra la administradora o el administrativo de tu sede." }, 403);
       if (b.estado && !["inscrito", "asistio", "perdido"].includes(b.estado)) return json({ error: "Esa acción es solo para la administradora" }, 403);
-      if ((b.estado === "inscrito" || b.pago_cuota !== undefined) && !vende(sesion)) return json({ error: "Los cobros los registra la administradora o el administrativo de tu sede." }, 403);
+      if (b.estado && antesLead?.estado === "inscrito") return json({ error: "A un inscrito solo lo cambia la administradora" }, 403);
+      if (b.monto !== undefined && b.estado !== "inscrito") return json({ error: "El monto solo se registra al inscribir" }, 403);
       if (b.estado === "inscrito") {
         const cfg = await cargarConfig(env);
         if (!cfg.personalPlanesLibres) {
@@ -381,7 +406,7 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
     }
     const campos = {};
     if (b.estado !== undefined) { if (!ESTADOS_VALIDOS.includes(b.estado)) return json({ error: "Estado no válido" }, 400); campos.estado = b.estado; }
-    if (b.monto !== undefined) campos.monto = Number(b.monto) || 0;
+    if (b.monto !== undefined) { const mo = Number(b.monto); if (!(Number.isFinite(mo) && mo >= 0 && mo <= 100000)) return json({ error: "Monto no válido" }, 400); campos.monto = mo; }
     if (b.nota !== undefined) campos.nota = String(b.nota).slice(0, 200);
     if (b.padre !== undefined) campos.padre = String(b.padre).slice(0, 40);
     if (b.archivado !== undefined) campos.archivado = b.archivado ? 1 : 0;
@@ -446,6 +471,9 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
   if (ruta === "/api/asistencia" && m === "PUT") {
     const b = await req.json().catch(() => ({}));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(b.fecha || "") || !Number.isInteger(b.lead_id)) return json({ error: "Datos no válidos" }, 400);
+    const quien = await env.DB.prepare("SELECT sede FROM leads WHERE id = ? AND archivado = 0").bind(b.lead_id).first();
+    if (!quien || (soloSede && quien.sede !== soloSede)) return json({ error: "Esa persona no es de tu sede" }, 403);
+    if (sesion.rol === "personal" && (b.fecha > limaHoy() || b.fecha < sumarDias(limaHoy(), -7))) return json({ error: "Solo puedes marcar los últimos 7 días" }, 400);
     if (b.presente === null) await env.DB.prepare("DELETE FROM asistencias WHERE lead_id = ? AND fecha = ?").bind(b.lead_id, b.fecha).run();
     else await env.DB.prepare("INSERT INTO asistencias (lead_id, fecha, presente, modo, autor) VALUES (?, ?, ?, 'lista', ?) ON CONFLICT(lead_id, fecha) DO UPDATE SET presente = excluded.presente, autor = excluded.autor").bind(b.lead_id, b.fecha, b.presente ? 1 : 0, autor).run();
     return json({ ok: true });
@@ -475,7 +503,7 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
     const b = await req.json().catch(() => ({}));
     const mm = String(b.codigo || "").toUpperCase().match(/SEDE:([A-Z]+):([A-F0-9]{16})/);
     if (!mm) return json({ error: "Ese código no es el QR de una sede" }, 400);
-    if (!SEDE_IDS.includes(mm[1]) || !igualSeguro(mm[2], (await firmar(env, `sede:${mm[1]}`)).slice(0, 16).toUpperCase())) return json({ error: "El QR de la sede no es válido. Pídele a Katy que lo imprima de nuevo." }, 400);
+    if (!SEDE_IDS.includes(mm[1]) || !igualSeguro(mm[2], (await firmar(env, `sede:${mm[1]}`, "qr")).slice(0, 16).toUpperCase())) return json({ error: "El QR de la sede no es válido. Pídele a Katy que lo imprima de nuevo." }, 400);
     if (sesion.rol !== "personal") return json({ error: "Este QR es para que el personal marque su entrada y salida." }, 400);
     if (sesion.sede && sesion.sede !== mm[1]) return json({ error: `Este QR es de otra sede (${mm[1]}). Tu sede es ${sesion.sede}.` }, 400);
     const fecha = limaHoy(), hora = horaLimaTxt();
@@ -495,6 +523,7 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
   }
   if (ruta === "/api/jornada" && m === "GET") { // mis jornadas de hoy y del mes (personal) o de todos (Katy)
     const mes = url.searchParams.get("mes") || limaHoy().slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(mes)) return json({ error: "Mes no válido" }, 400);
     const { results } = await env.DB.prepare(
       `SELECT j.*, p.nombre, p.tipo_pago, p.tarifa FROM jornadas j JOIN personal p ON p.id = j.personal_id WHERE j.fecha LIKE ?${sesion.rol === "personal" ? " AND j.personal_id = ?" : ""} ORDER BY j.fecha DESC, j.id DESC LIMIT 2000`,
     ).bind(mes + "%", ...(sesion.rol === "personal" ? [sesion.id] : [])).all();
@@ -503,7 +532,7 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
   if (ruta === "/api/personal/pago" && m === "POST") { // Katy registra el pago del mes a un profesor
     const b = await req.json().catch(() => ({}));
     const p = await env.DB.prepare("SELECT nombre, sede FROM personal WHERE id = ?").bind(Number(b.id)).first();
-    if (!p || !(Number(b.monto) > 0)) return json({ error: "Faltan datos" }, 400);
+    if (!p || !montoValido(b.monto)) return json({ error: "Faltan datos" }, 400);
     await env.DB.prepare("INSERT INTO movimientos (fecha, tipo, categoria, sede, monto, nota, autor, creado) VALUES (?, 'egreso', 'Profesores', ?, ?, ?, ?, ?)")
       .bind(limaHoy(), p.sede, Number(b.monto), `Pago a ${p.nombre}${b.mes ? ` · ${b.mes}` : ""}`, autor, ahoraISO()).run();
     ctx.waitUntil(anotar(env, autor, "pagó al personal", `${p.nombre} S/ ${b.monto}`));
@@ -515,6 +544,7 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
   if (mCarnet && m === "POST") {
     const l = await env.DB.prepare("SELECT * FROM leads WHERE id = ?").bind(Number(mCarnet[1])).first();
     if (!l) return json({ error: "No encontrado" }, 404);
+    if (soloSede && l.sede !== soloSede) return json({ error: "Esa persona no es de tu sede" }, 403);
     let token = l.token;
     if (!token) { token = nuevoToken(); await env.DB.prepare("UPDATE leads SET token = ? WHERE id = ?").bind(token, l.id).run(); }
     const enlace = `${url.origin}/carnet/${token}`;
@@ -541,6 +571,7 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
       if (!np) faltan.push({ que: "Los profesores de cada sede, con su PIN", donde: "Ajustes → Personal de las sedes" });
       if (!cfg.soporte?.whatsapp) faltan.push({ que: "El WhatsApp de quien te ayuda con el panel", donde: "Ajustes → Opciones avanzadas → Ayuda técnica" });
     }
+    if (errorWA && sesion.rol === "personal") errorWA = { motivo: errorWA.motivo };
     return json({ errorWA, faltan });
   }
 
@@ -565,12 +596,12 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
     const l = await env.DB.prepare("SELECT id, sede, padre, perfil FROM leads WHERE id = ?").bind(Number(mUni[1])).first();
     if (!l || (soloSede && l.sede !== soloSede)) return json({ error: "Esa persona no es de tu sede" }, 403);
     if (!b.talla) return json({ error: "Elige la talla" }, 400);
+    if (Number(b.monto) > 0 && !vende(sesion)) return json({ error: "El cobro del uniforme lo registra la administradora o el administrativo de sede" }, 403);
     const st = await env.DB.prepare("SELECT cantidad FROM uniformes WHERE talla = ?").bind(b.talla).first();
     await env.DB.prepare("UPDATE leads SET uniforme_talla = ?, uniforme_entregado = ?, actualizado = ? WHERE id = ?").bind(String(b.talla).slice(0, 10), limaHoy(), ahoraISO(), l.id).run();
     if (st) await env.DB.prepare("UPDATE uniformes SET cantidad = MAX(0, cantidad - 1) WHERE talla = ?").bind(b.talla).run();
-    const monto = Number(b.monto) || 0;
+    const monto = montoValido(b.monto) ? Number(b.monto) : 0;
     if (monto > 0) {
-      if (!vende(sesion)) return json({ error: "El cobro del uniforme lo registra la administradora o el administrativo de sede" }, 403);
       await env.DB.prepare("INSERT INTO movimientos (fecha, tipo, categoria, sede, monto, nota, lead_id, autor, creado) VALUES (?, 'ingreso', 'Uniforme', ?, ?, ?, ?, ?, ?)").bind(limaHoy(), l.sede, monto, `${l.padre || l.perfil || ""} · talla ${b.talla}`, l.id, autor, ahoraISO()).run();
     }
     ctx.waitUntil(anotar(env, autor, "entregó uniforme", `#${l.id} talla ${b.talla}${monto ? ` S/ ${monto}` : ""}`));
@@ -588,7 +619,7 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
   }
   if (ruta === "/api/copia.json" && m === "GET" && sesion.rol === "admin") {
     const datos = await copiaSeguridad(env);
-    return new Response(JSON.stringify(datos), { headers: { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="copia-coyote-${limaHoy()}.json"` } });
+    return new Response(JSON.stringify(datos), { headers: { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="copia-coyote-${limaHoy()}.json"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
   }
 
   // Personal de las sedes (solo Katy)
@@ -600,10 +631,11 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
     const b = await req.json().catch(() => ({}));
     const nombre = String(b.nombre || "").trim().slice(0, 40), pin = String(b.pin || "").trim();
     if (nombre.length < 2) return json({ error: "Escribe el nombre" }, 400);
-    if (!/^\d{4,8}$/.test(pin)) return json({ error: "El PIN debe tener de 4 a 8 números" }, 400);
+    if (!/^\d{6,8}$/.test(pin)) return json({ error: "El PIN debe tener de 6 a 8 números" }, 400);
     if (b.sede && !SEDE_IDS.includes(b.sede)) return json({ error: "Sede no válida" }, 400);
     if (await env.DB.prepare("SELECT 1 FROM personal WHERE lower(nombre) = lower(?) AND activo = 1").bind(nombre).first()) return json({ error: "Ya hay alguien con ese nombre. Usa nombre y apellido." }, 409);
-    await env.DB.prepare("INSERT INTO personal (nombre, rol, sede, pin_hash, tipo_pago, tarifa, creado) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(nombre, String(b.rol || "Profesor").slice(0, 30), b.sede || null, await hashPin(env, pin), ["clase", "hora", "mes"].includes(b.tipo_pago) ? b.tipo_pago : "clase", Number(b.tarifa) || 0, ahoraISO()).run();
+    const sal = nuevaSal();
+    await env.DB.prepare("INSERT INTO personal (nombre, rol, sede, pin_hash, pin_sal, tipo_pago, tarifa, creado) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(nombre, String(b.rol || "Profesor").slice(0, 30), b.sede || null, await hashPin(env, pin, sal), sal, ["clase", "hora", "mes"].includes(b.tipo_pago) ? b.tipo_pago : "clase", Math.min(100000, Math.max(0, Number(b.tarifa) || 0)), ahoraISO()).run();
     ctx.waitUntil(anotar(env, autor, "agregó personal", nombre));
     return json({ ok: true }, 201);
   }
@@ -615,10 +647,16 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
     if (b.sede !== undefined) { if (b.sede && !SEDE_IDS.includes(b.sede)) return json({ error: "Sede no válida" }, 400); campos.sede = b.sede || null; }
     if (b.rol !== undefined) campos.rol = String(b.rol).slice(0, 30);
     if (b.tipo_pago !== undefined) { if (!["clase", "hora", "mes"].includes(b.tipo_pago)) return json({ error: "Forma de pago no válida" }, 400); campos.tipo_pago = b.tipo_pago; }
-    if (b.tarifa !== undefined) { if (!(Number(b.tarifa) >= 0)) return json({ error: "Tarifa no válida" }, 400); campos.tarifa = Number(b.tarifa); }
-    if (b.pin !== undefined) { if (!/^\d{4,8}$/.test(String(b.pin))) return json({ error: "El PIN debe tener de 4 a 8 números" }, 400); campos.pin_hash = await hashPin(env, String(b.pin)); }
+    if (b.tarifa !== undefined) { if (!(Number.isFinite(Number(b.tarifa)) && Number(b.tarifa) >= 0 && Number(b.tarifa) <= 100000)) return json({ error: "Tarifa no válida" }, 400); campos.tarifa = Number(b.tarifa); }
+    if (b.pin !== undefined) { if (!/^\d{6,8}$/.test(String(b.pin))) return json({ error: "El PIN debe tener de 6 a 8 números" }, 400); campos.pin_sal = nuevaSal(); campos.pin_hash = await hashPin(env, String(b.pin), campos.pin_sal); }
+    if (b.activo === false) ctx.waitUntil(env.DB.prepare("DELETE FROM sesiones_panel WHERE personal_id = ?").bind(Number(mPers[1])).run().catch(() => {}));
     const k = Object.keys(campos); if (!k.length) return json({ error: "Nada que cambiar" }, 400);
     await env.DB.prepare(`UPDATE personal SET ${k.map((x) => `${x} = ?`).join(", ")} WHERE id = ?`).bind(...k.map((x) => campos[x]), Number(mPers[1])).run();
+    return json({ ok: true });
+  }
+  if (ruta === "/api/sesiones/cerrar" && m === "POST") { // cierra todas las sesiones menos la actual
+    await env.DB.prepare("DELETE FROM sesiones_panel WHERE id != ?").bind(sesion.sesionId || "").run();
+    ctx.waitUntil(anotar(env, autor, "cerró todas las sesiones"));
     return json({ ok: true });
   }
   if (ruta === "/api/bitacora" && m === "GET") {
@@ -637,7 +675,7 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
   }
   if (ruta === "/api/caja" && m === "POST") {
     const b = await req.json().catch(() => ({}));
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(b.fecha || "") || !["ingreso", "egreso"].includes(b.tipo) || !(Number(b.monto) > 0) || !String(b.categoria || "").trim()) return json({ error: "Completa fecha, tipo, categoría y monto" }, 400);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(b.fecha || "") || !["ingreso", "egreso"].includes(b.tipo) || !montoValido(b.monto) || !String(b.categoria || "").trim()) return json({ error: "Completa fecha, tipo, categoría y monto" }, 400);
     if (b.sede && !SEDE_IDS.includes(b.sede)) return json({ error: "Sede no válida" }, 400);
     if (soloSede) b.sede = soloSede;
     const r = await env.DB.prepare("INSERT INTO movimientos (fecha, tipo, categoria, sede, monto, nota, autor, creado) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
@@ -651,14 +689,14 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
     const { results } = await env.DB.prepare("SELECT fecha, tipo, categoria, sede, monto, nota FROM movimientos ORDER BY fecha, id").all();
     const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = "\ufeff" + ["Fecha,Tipo,Categoría,Sede,Monto (S/),Nota", ...results.map((r) => [r.fecha, r.tipo, r.categoria, r.sede, r.monto, r.nota].map(esc).join(","))].join("\n");
-    return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="caja-coyote.csv"' } });
+    return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="caja-coyote.csv"', "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
   }
 
   if (ruta === "/api/asistencia.csv" && m === "GET") {
     const { results } = await env.DB.prepare("SELECT COALESCE(l.padre, l.perfil) padre, l.sede, a.fecha, a.presente, a.hora FROM asistencias a JOIN leads l ON l.id = a.lead_id ORDER BY l.sede, l.padre, a.fecha").all();
     const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = "\ufeff" + ["Nombre,Sede,Fecha,Vino,Hora", ...results.map((r) => [r.padre, r.sede, r.fecha, r.presente ? "Sí" : "No", r.hora].map(esc).join(","))].join("\n");
-    return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="asistencia-coyote.csv"' } });
+    return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="asistencia-coyote.csv"', "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
   }
   // Cómo llegaron los que se inscribieron
   if (ruta === "/api/canales" && m === "GET") {
@@ -684,12 +722,17 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
     const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const fila = (r) => cols.map((c) => esc(c === "estado" ? ESTADOS[r[c]] || r[c] : r[c])).join(",");
     const csv = "﻿" + [nombres.join(","), ...results.map(fila)].join("\n");
-    return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="consultas-coyote.csv"' } });
+    return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="consultas-coyote.csv"', "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
   }
 
   // Configuración del bot
   if (ruta === "/api/config" && m === "GET") {
-    return json({ config: await cargarConfig(env), cambios: await cambiosGuardados(env) });
+    const cfg = await cargarConfig(env);
+    if (sesion.rol === "personal") { // solo lo que su pantalla necesita, sin números privados
+      const sedes = Object.fromEntries(Object.entries(cfg.sedes).map(([k, s]) => [k, { nombre: s.nombre, corto: s.corto, activa: s.activa }]));
+      return json({ config: { activo: cfg.activo, escuela: cfg.escuela, nombreHumano: cfg.nombreHumano, sedes, precioVerano: cfg.precioVerano, precioCiclo: cfg.precioCiclo, clasesVerano: cfg.clasesVerano, uniforme: cfg.uniforme, uniformePreventa: cfg.uniformePreventa, pisoPorClase: cfg.pisoPorClase, personalPlanesLibres: cfg.personalPlanesLibres, cuotas: { permitir: false }, tallas: cfg.tallas, atencion: { modo: cfg.atencion?.modo }, encuesta: { semanas: cfg.encuesta?.semanas }, soporte: cfg.soporte, respuestasGuardadas: [], edades: cfg.edades, clasePrueba: cfg.clasePrueba, automatizaciones: { renovacion: cfg.automatizaciones?.renovacion } }, cambios: { n: 0 } });
+    }
+    return json({ config: cfg, cambios: await cambiosGuardados(env) });
   }
   if (ruta === "/api/config" && m === "PUT") {
     const b = await req.json();
@@ -764,6 +807,7 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
 
   // Para pruebas: correr las tareas automáticas como si fuera cierta hora de Lima
   if (ruta === "/api/ejecutar-tareas" && m === "POST") {
+    if (!env.PRUEBAS) return json({ error: "Solo disponible en el entorno de pruebas" }, 404);
     const hora = Number(url.searchParams.get("hora"));
     return json(await tareasDeLaHora(env, await leerValor(env, "url_panel"), Number.isInteger(hora) ? hora : undefined));
   }
@@ -786,7 +830,9 @@ export default {
       return ok ? new Response(url.searchParams.get("hub.challenge")) : new Response("Token no válido", { status: 403 });
     }
     if (p === "/webhook" && req.method === "POST") {
+      if (Number(req.headers.get("Content-Length") || 0) > 1_000_000) return new Response("Demasiado grande", { status: 413 });
       const cuerpo = await req.text();
+      if (cuerpo.length > 1_000_000) return new Response("Demasiado grande", { status: 413 });
       if (!(await verificarFirma(env, cuerpo, req.headers.get("X-Hub-Signature-256")))) {
         return new Response("Firma no válida", { status: 401 });
       }
@@ -814,13 +860,15 @@ export default {
       const clave = String(form.get("clave") || "").trim().slice(0, 100);
       const nombre = String(form.get("nombre") || "").trim().slice(0, 60);
       const ip = req.headers.get("CF-Connecting-IP") || "desconocida";
-      const claveIntento = nombre ? `n:${nombre.toLowerCase()}` : `ip:${ip}`;
+      const claveIntento = nombre ? `n:${nombre.toLowerCase()}` : "admin"; // la clave de Katy se cuenta globalmente, no solo por IP
       if (!(await intentoPermitido(env, `ip:${ip}`)) || !(await intentoPermitido(env, claveIntento))) {
-        return html(entrarHTML("Demasiados intentos. Espera 15 minutos y vuelve a probar.", nombre ? "personal" : "admin"), 429);
+        return html(entrarHTML("Demasiados intentos. Espera un rato y vuelve a probar.", nombre ? "personal" : "admin"), 429);
       }
+      if (!env.SESSION_SECRET) return html(entrarHTML("Falta configurar el secreto de sesión. Avisa a quien instaló el bot (GUIA.md, paso 4)."), 500);
       if (nombre) { // personal: nombre + PIN
-        const h = env.ADMIN_PASSWORD ? await hashPin(env, clave) : "";
-        const p = await env.DB.prepare("SELECT id, nombre FROM personal WHERE lower(nombre) = lower(?) AND pin_hash = ? AND activo = 1").bind(nombre, h).first();
+        const cand = await env.DB.prepare("SELECT id, nombre, pin_hash, pin_sal FROM personal WHERE lower(nombre) = lower(?) AND activo = 1").bind(nombre).first();
+        const h = cand ? await hashPin(env, clave, cand.pin_sal || "") : await hashPin(env, clave, "x"); // mismo tiempo exista o no
+        const p = cand && igualSeguro(h, cand.pin_hash) ? cand : null;
         if (!p) { await anotarFallo(env, `ip:${ip}`); await anotarFallo(env, claveIntento); await new Promise((r) => setTimeout(r, 800)); return html(entrarHTML("El nombre o el PIN no coinciden. Pídele a Katy que revise tu acceso.", "personal"), 401); }
         ctx.waitUntil(limpiarFallos(env, claveIntento));
         ctx.waitUntil(env.DB.prepare("UPDATE personal SET ultimo_ingreso = ? WHERE id = ?").bind(ahoraISO(), p.id).run());
@@ -828,16 +876,20 @@ export default {
         return new Response(null, { status: 303, headers: { Location: "/panel", "Set-Cookie": await cookieSesion(env, url, "personal", p.id) } });
       }
       if (!env.ADMIN_PASSWORD || !igualSeguro(clave, env.ADMIN_PASSWORD)) {
-        await anotarFallo(env, `ip:${ip}`);
+        await anotarFallo(env, `ip:${ip}`); await anotarFallo(env, "admin");
         await new Promise((r) => setTimeout(r, 800));
         return html(entrarHTML("La clave no es correcta. Revisa mayúsculas y vuelve a intentar."), 401);
       }
-      ctx.waitUntil(limpiarFallos(env, `ip:${ip}`));
+      ctx.waitUntil(limpiarFallos(env, `ip:${ip}`)); ctx.waitUntil(limpiarFallos(env, "admin"));
       ctx.waitUntil(guardarValor(env, "url_panel", `${url.origin}/panel`));
       return new Response(null, { status: 303, headers: { Location: "/panel", "Set-Cookie": await cookieSesion(env, url) } });
     }
     if (p === "/salir") {
-      return new Response(null, { status: 303, headers: { Location: "/entrar", "Set-Cookie": "coyote_sesion=; Path=/; Max-Age=0" } });
+      const sfs = req.headers.get("Sec-Fetch-Site");
+      if (sfs && sfs !== "same-origin" && sfs !== "none") return new Response(null, { status: 303, headers: { Location: "/panel" } });
+      const m = (req.headers.get("Cookie") || "").match(/coyote_sesion=([a-f0-9]{32})\./);
+      if (m) ctx.waitUntil(env.DB.prepare("DELETE FROM sesiones_panel WHERE id = ?").bind(m[1]).run().catch(() => {}));
+      return new Response(null, { status: 303, headers: { Location: "/entrar", "Set-Cookie": cookieBorrar(url) } });
     }
 
     // QR fijo de una sede para que el personal marque entrada y salida (solo Katy lo imprime)
@@ -847,10 +899,10 @@ export default {
       if (!ses || ses.rol !== "admin") return new Response(null, { status: 303, headers: { Location: "/entrar" } });
       const cfg = await cargarConfig(env), sede = cfg.sedes[mS[1]];
       if (!sede) return new Response("No encontrado", { status: 404 });
-      const codigo = `SEDE:${mS[1]}:${(await firmar(env, `sede:${mS[1]}`)).slice(0, 16).toUpperCase()}`;
-      return html(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QR de ${sede.nombre}</title>
+      const codigo = `SEDE:${mS[1]}:${(await firmar(env, `sede:${mS[1]}`, "qr")).slice(0, 16).toUpperCase()}`;
+      return html(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QR de ${sede.nombre.replace(/[<>&"]/g, "")}</title>
 <style>body{margin:0;font:17px/1.4 Barlow,system-ui,sans-serif;color:#1f1b19;display:grid;place-items:center;min-height:100vh;background:#f2f3f0}.h{background:#fff;border-radius:22px;padding:28px;text-align:center;width:min(100%,420px);box-shadow:0 10px 30px rgba(0,0,0,.12)}.h svg{width:300px;height:300px}h1{font-family:"Barlow Condensed",Arial Narrow,sans-serif;font-size:2.2rem;margin:10px 0 0}p{margin:6px 0 0;color:#5b605a}.b{background:#c8202a;color:#fff;font-weight:700;border-radius:12px;padding:10px 16px;display:inline-block;margin-top:16px;text-decoration:none}@media print{body{background:#fff}.h{box-shadow:none}.b{display:none}}</style></head>
-<body><div class="h">${qrSVG(codigo, 300)}<h1>Escuela Coyote · ${sede.nombre}</h1><p>Personal: escanea este código desde tu panel al llegar y al salir.</p><a class="b" href="javascript:print()">Imprimir</a></div></body></html>`);
+<body><div class="h">${qrSVG(codigo, 300)}<h1>Escuela Coyote · ${sede.nombre.replace(/[<>&"]/g, "")}</h1><p>Personal: escanea este código desde tu panel al llegar y al salir.</p><a class="b" href="javascript:print()">Imprimir</a></div></body></html>`);
     }
 
     // Carnet digital (enlace que recibe el papá; no requiere clave)
@@ -879,6 +931,10 @@ export default {
           : new Response(null, { status: 303, headers: { Location: "/entrar" } });
       }
       if (p.startsWith("/api/")) {
+        if (req.method !== "GET") { // segunda barrera contra peticiones desde otras páginas
+          const sfs = req.headers.get("Sec-Fetch-Site"), origen = req.headers.get("Origin");
+          if ((sfs && sfs !== "same-origin" && sfs !== "none") || (origen && origen !== url.origin)) return json({ error: "Origen no permitido" }, 403);
+        }
         if (sesion.rol === "personal" && !permitidoPersonal(req.method, p, sesion)) return json({ error: sesion.cargo === "Administrativo de sede" ? "Esta parte del panel es solo para la administradora." : "Las ventas y la caja las maneja la administradora o el administrativo de tu sede." }, 403);
         return api(req, env, url, ctx, sesion);
       }

@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS personal (
   rol TEXT NOT NULL DEFAULT 'Profesor',
   sede TEXT,                      -- LO, SMP, PP o NULL (todas)
   pin_hash TEXT NOT NULL,
+  pin_sal TEXT,                            -- sal aleatoria por persona (PBKDF2)
   activo INTEGER NOT NULL DEFAULT 1,
   tipo_pago TEXT NOT NULL DEFAULT 'clase', -- 'clase', 'hora' o 'mes'
   tarifa REAL NOT NULL DEFAULT 0,          -- soles por clase, por hora o al mes
@@ -182,6 +183,16 @@ CREATE TABLE IF NOT EXISTS campana_envios (
   ok INTEGER NOT NULL,
   creado TEXT NOT NULL,
   PRIMARY KEY (campana, lead_id)
+);
+
+-- Sesiones abiertas del panel (se pueden cerrar todas desde Ajustes)
+CREATE TABLE IF NOT EXISTS sesiones_panel (
+  id TEXT PRIMARY KEY,
+  rol TEXT NOT NULL,              -- 'admin' o 'personal'
+  personal_id INTEGER,
+  vence TEXT NOT NULL,
+  creado TEXT NOT NULL,
+  ultimo_uso TEXT
 );
 
 -- Intentos de entrar al panel (para frenar la fuerza bruta)

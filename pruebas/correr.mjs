@@ -1,7 +1,7 @@
 // Corre todas las pruebas de punta a punta contra el bot en local.
 // Uso: npm test   (necesita .dev.vars con los valores de prueba de abajo)
 //   WHATSAPP_TOKEN=token-de-prueba  APP_SECRET=secreto-de-prueba  VERIFY_TOKEN=verificar-prueba
-//   ADMIN_PASSWORD=clave-panel  GRAPH_BASE=http://127.0.0.1:9999
+//   ADMIN_PASSWORD=clave-panel  SESSION_SECRET=secreto-sesion-prueba  PRUEBAS=1  GRAPH_BASE=http://127.0.0.1:9999
 import { spawn, execSync } from "node:child_process";
 import { setTimeout as esperar } from "node:timers/promises";
 import { readFileSync, writeFileSync } from "node:fs";

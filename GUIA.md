@@ -113,6 +113,7 @@ npx wrangler secret put WHATSAPP_TOKEN     # el token permanente
 npx wrangler secret put APP_SECRET         # la clave secreta de la app
 npx wrangler secret put VERIFY_TOKEN       # invéntala: una frase larga sin espacios
 npx wrangler secret put ADMIN_PASSWORD     # la clave del panel de Katy (12 caracteres o más, fácil de escribir en el celular)
+openssl rand -hex 32 | npx wrangler secret put SESSION_SECRET   # secreto aleatorio para las sesiones; nadie necesita saberlo
 npx wrangler deploy
 ```
 
@@ -282,6 +283,7 @@ La dirección del bot sin `/panel` (por ejemplo `https://coyote-bot.TU-NOMBRE.wo
 - **Personal.** En **Ajustes → Personal de las sedes**, Katy agrega a cada profesor o asistente con su nombre, cargo, sede y un PIN de 4 a 8 números (se lo dice en persona; el sistema no lo guarda en texto legible). Ellos entran en la pantalla de clave eligiendo **Profesor o personal**, con su nombre y PIN; la sesión les dura 30 días.
 - **Cuenta de pagos.** En **Ajustes → Cuenta de la escuela para pagos** va el Yape/Plin de la escuela y el titular; el bot, la web y la respuesta guardada «Datos de pago» lo usan. Nunca la cuenta de un profesor.
 - **Qué puede vender el personal:** solo el paquete de verano y el ciclo de 12 clases, al precio publicado. Los planes a medida y otros montos los registra Katy (se puede permitir al personal con un interruptor en esa misma sección).
+- **Sesiones.** Si Katy pierde el celular, en Ajustes → Personal → «Cerrar sesión en todos los otros celulares» invalida al instante todas las sesiones abiertas menos la suya. Al quitarle acceso a alguien del personal, sus sesiones se cierran solas.
 - **Qué puede hacer el personal:** ver las personas de su sede (con los celulares ocultos), pasar lista y escanear carnets, registrar ventas en la cancha, anotar gastos de su sede y agregar notas. **No puede:** ver chats, cambiar Ajustes, ver Números ni otras sedes, borrar personas ni descargar listas. Todo lo que hace queda a su nombre en **Ajustes → Personal → Quién hizo qué**. «Quitar acceso» lo saca al instante.
 - **Venta en la cancha.** En **Hoy → Registrar una venta en la cancha**: nombre, celular (opcional), edad, plan (verano, ciclo u otro), monto y cómo pagó. La persona queda inscrita, el pago entra en Caja con quién lo registró y se crea su carnet QR. Si dejó celular, el bot le envía el carnet cuando escriba (WhatsApp no deja iniciar la conversación sin plantilla); mientras tanto se puede abrir, mostrar o imprimir desde el panel.
 
@@ -376,7 +378,8 @@ Flujo de trabajo: cambio → `npm test` en la computadora → `npm run deploy:pr
 | En Chats dice que pasaron 24 horas | Regla de WhatsApp | Usa «Enviar mensaje para retomar» (plantilla `retomar_conversacion` aprobada) |
 | Un audio o foto ya no se abre | WhatsApp borra los archivos después de unos 30 días | Pide que lo reenvíen |
 | El bot le responde a un familiar | El número no está en la lista de excluidos | Agrégalo en Ajustes → Opciones avanzadas → Números que el bot no atiende |
-| Katy no puede entrar | Clave distinta | Vuelve a definirla con `wrangler secret put ADMIN_PASSWORD`; eso cierra todas las sesiones abiertas |
+| Al entrar dice «Falta configurar el secreto de sesión» | No se creó `SESSION_SECRET` | Paso 4: `openssl rand -hex 32 \| npx wrangler secret put SESSION_SECRET` |
+| Katy no puede entrar | Clave distinta | Vuelve a definirla con `wrangler secret put ADMIN_PASSWORD`. Para cerrar todas las sesiones abiertas: Ajustes → Personal → «Cerrar sesión en todos los otros celulares», o `wrangler secret put SESSION_SECRET` con un valor nuevo |
 
 ## Privacidad
 

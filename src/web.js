@@ -46,7 +46,7 @@ export function webHTML(cfg, canal = "web") {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(cfg.escuela)} — Verano ${esc(w.temporada || "")}</title>
-<meta name="description" content="Escuela de fútbol para niños de ${min} a ${max} años en ${sedes.map(([, s]) => s.nombre).join(", ")}. Clase de prueba gratis. ${cfg.clasesVerano} clases de verano por S/ ${cfg.precioVerano}.">
+<meta name="description" content="Escuela de fútbol para niños de ${min} a ${max} años en ${esc(sedes.map(([, s]) => s.nombre).join(", "))}. Clase de prueba gratis. ${cfg.clasesVerano} clases de verano por S/ ${cfg.precioVerano}.">
 <meta property="og:title" content="${esc(cfg.escuela)}"><meta property="og:description" content="Clase de prueba gratis. ${cfg.clasesVerano} clases de verano por S/ ${cfg.precioVerano}.">
 <link rel="icon" href="/icono-192.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#1e7a46">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -152,7 +152,7 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:6px 18px}
 
 <main id="contenido">
 <section class="hero" aria-labelledby="titular">${CANCHA}<div class="wrap">
-<p class="dato">Verano ${esc(w.temporada || "")}${inicio ? `, desde el ${esc(inicio)},` : ""} en ${sedes.map(([, s]) => s.nombre).map((n, i, a) => (i === a.length - 1 && a.length > 1 ? "y " + n : n)).join(sedes.length > 2 ? ", " : " ").replace(", y ", " y ")}</p>
+<p class="dato">Verano ${esc(w.temporada || "")}${inicio ? `, desde el ${esc(inicio)},` : ""} en ${esc(sedes.map(([, s]) => s.nombre).map((n, i, a) => (i === a.length - 1 && a.length > 1 ? "y " + n : n)).join(sedes.length > 2 ? ", " : " ").replace(", y ", " y "))}</p>
 <h1 id="titular">${texto(w.titulo || "Tu hijo juega. Nosotros lo formamos.")}</h1>
 <p>${texto(w.subtitulo || `Entrenamientos 3 veces por semana para niños y niñas de ${min} a ${max} años, con profesores con experiencia. Ven a una clase de prueba gratis y decide después.`)}</p>
 <div class="acciones"><a class="btn wa" href="${wa(`Hola, quiero una clase de prueba gratis`)}">${ICONO_WA}Pedir clase de prueba gratis</a><a class="btn claro" href="#sedes">Ver sedes y horarios</a></div>

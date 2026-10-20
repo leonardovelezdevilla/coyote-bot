@@ -32,7 +32,7 @@ enabled = true
 # Crea su base con: npx wrangler d1 create coyote-bot-prueba  y pega el id abajo.
 [env.prueba]
 name = "coyote-bot-prueba"
-vars = { PHONE_NUMBER_ID = "COMPLETAR", GRAPH_VERSION = "v23.0" }
+vars = { PHONE_NUMBER_ID = "COMPLETAR", GRAPH_VERSION = "v23.0", PRUEBAS = "1" }
 [[env.prueba.d1_databases]]
 binding = "DB"
 database_name = "coyote-bot-prueba"

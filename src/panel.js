@@ -88,6 +88,8 @@ a.onclick=function(){modo(false)};p.onclick=function(){modo(true)};try{if(!${per
 </script></body></html>`;
 }
 
+const escS = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
 export function panelHTML(cfg, sesion = { rol: "admin" }) {
   const personal = sesion.rol === "personal";
   const vende = sesion.rol === "admin" || sesion.cargo === "Administrativo de sede";
@@ -231,7 +233,7 @@ dialog.escaner::backdrop{background:rgba(0,0,0,.6)}
 @media (max-width:560px){.f2{grid-template-columns:minmax(0,1fr)}.titulo-vista h2{font-size:1.75rem}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style></head><body>
-<div class="banda"><div class="dentro">${ESCUDO(44)}<div class="marca">Coyote<small>${personal ? `${sesion.nombre} · ${cfg.sedes[sesion.sede]?.nombre || "todas las sedes"}` : "Escuela de fútbol"}</small></div><div class="der"><button type="button" data-v="ayuda">Ayuda</button><a href="/salir">Salir</a></div></div></div>
+<div class="banda"><div class="dentro">${ESCUDO(44)}<div class="marca">Coyote<small>${personal ? `${escS(sesion.nombre)} · ${escS(cfg.sedes[sesion.sede]?.nombre || "todas las sedes")}` : "Escuela de fútbol"}</small></div><div class="der"><button type="button" data-v="ayuda">Ayuda</button><form method="post" action="/salir" style="margin:0"><button type="submit">Salir</button></form></div></div></div>
 <nav aria-label="Secciones"${personal ? ` class="personal${vende ? "" : " sin-caja"}"` : ""}>
 <button data-v="hoy" aria-current="page" data-i="casa">Hoy</button>
 ${personal ? "" : '<button data-v="chats" data-i="chat">Chats</button>'}
@@ -260,7 +262,7 @@ function appBase() {
   const A = (window.APP = { leads: [], gastos: [], cfg: null, cambios: { n: 0 }, vista: "hoy", sinGuardar: false });
   window.$ = (s) => document.querySelector(s);
   window.el = (t, attrs, txt) => { const x = document.createElement(t); Object.assign(x, attrs || {}); if (txt != null) x.textContent = txt; return x; };
-  window.esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  window.esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   const P = {
     casa: '<path d="M3.5 11 12 4l8.5 7v8.5a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z"/>',
     gente: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M18 14.8c2 .7 3.2 2.4 3.6 5.2"/>',
@@ -1291,8 +1293,9 @@ function appAjustes() {
         <label>Nombre y apellido<input id="pNom" maxlength="40" required placeholder="Carlos Quispe"></label>
         <label>Cargo <small>Solo «Administrativo de sede» puede vender y anotar en caja</small><select id="pRol"><option>Profesor</option><option>Asistente</option><option>Administrativo de sede</option></select></label>
         <label>Sede<select id="pSede"><option value="">Todas las sedes</option>${SEDE_IDS.map((id) => `<option value="${id}">${esc(cfg.sedes[id].nombre)}</option>`).join("")}</select></label>
-        <label>PIN <small>(4 a 8 números; díselo en persona)</small><input id="pPin" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" required></label>
+        <label>PIN <small>(6 a 8 números; díselo en persona)</small><input id="pPin" inputmode="numeric" pattern="[0-9]{6,8}" maxlength="8" required></label>
         <button class="btn principal" style="grid-column:1/-1">Agregar</button></form></details>
+      <div><button type="button" class="btn claro" id="cerrarSesiones">Cerrar sesión en todos los otros celulares</button></div>
       <details class="mas"><summary>${ico("nota")}&nbsp;Quién hizo qué (últimos movimientos)</summary><div id="bitacora" style="margin-top:10px"><p class="gris">Cargando…</p></div></details></section>
     <section class="tarjeta"><h3>Respuestas guardadas</h3><p class="gris">Aparecen como botones en cada chat: tócalas y el texto se escribe solo. Antes de enviar puedes cambiarlo.</p>
       <div class="lista-ed" id="resp"></div><div><button type="button" class="btn" id="respAdd">${"Agregar respuesta"}</button></div></section>
@@ -1380,12 +1383,14 @@ function appAjustes() {
       const bTar = boton("Tarifa", "claro"); bTar.onclick = async () => { const t = prompt(`Tarifa de ${p.nombre}: escribe el monto y cómo se paga, por ejemplo «25 clase», «15 hora» o «900 mes»:`, `${p.tarifa} ${p.tipo_pago}`); if (t == null) return; const mm = t.trim().match(/^(\d+(?:[.,]\d+)?)\s*(clase|hora|mes)$/i); if (!mm) { avisoRapido("Escríbelo como «25 clase», «15 hora» o «900 mes»"); return; } try { await api("PATCH", "/api/personal/" + p.id, { tarifa: Number(mm[1].replace(",", ".")), tipo_pago: mm[2].toLowerCase() }); avisoRapido("Tarifa guardada"); pintarPersonal(); } catch (e) { avisoRapido(e.message); } };
       const bPag = boton("Registrar pago", "exito", "ok"); bPag.disabled = !(pago > 0); bPag.onclick = async () => { if (!bPag.dataset.ok) { bPag.dataset.ok = "1"; bPag.lastChild.textContent = `Toca otra vez: ${soles(pago)}`; return; } try { await api("POST", "/api/personal/pago", { id: p.id, monto: Math.round(pago * 100) / 100, mes: mesBonitoP(mesP) }); avisoRapido(`Pago a ${p.nombre} anotado en Caja`); delete bPag.dataset.ok; bPag.lastChild.textContent = "Registrar pago"; } catch (e) { avisoRapido(e.message); } };
       acc.append(bTar, bPag);
-      const bPin = boton("Cambiar PIN", "claro"); bPin.onclick = async () => { const pin = prompt(`Nuevo PIN para ${p.nombre} (4 a 8 números):`); if (pin == null) return; try { await api("PATCH", "/api/personal/" + p.id, { pin }); avisoRapido("PIN cambiado"); } catch (e) { avisoRapido(e.message); } };
+      const bPin = boton("Cambiar PIN", "claro"); bPin.onclick = async () => { const pin = prompt(`Nuevo PIN para ${p.nombre} (6 a 8 números):`); if (pin == null) return; try { await api("PATCH", "/api/personal/" + p.id, { pin }); avisoRapido("PIN cambiado"); } catch (e) { avisoRapido(e.message); } };
       const bAct = boton(p.activo ? "Quitar acceso" : "Dar acceso", p.activo ? "claro" : "exito", p.activo ? "no" : "ok"); bAct.onclick = async () => { try { await api("PATCH", "/api/personal/" + p.id, { activo: !p.activo }); avisoRapido(p.activo ? `${p.nombre} ya no puede entrar` : `${p.nombre} ya puede entrar`); pintarPersonal(); } catch (e) { avisoRapido(e.message); } };
       acc.append(bPin, bAct); box.append(d);
     });
     const f = $("#personalForm");
     if (f) f.onsubmit = async (e) => { e.preventDefault(); try { await api("POST", "/api/personal", { nombre: $("#pNom").value, rol: $("#pRol").value, sede: $("#pSede").value, pin: $("#pPin").value }); avisoRapido(`Listo. ${$("#pNom").value} entra con su nombre y su PIN en la pantalla de clave.`); f.reset(); pintarPersonal(); } catch (err) { avisoRapido(err.message); } };
+    const cs = $("#cerrarSesiones");
+    if (cs) cs.onclick = async () => { if (!cs.dataset.ok) { cs.dataset.ok = "1"; cs.textContent = "Toca otra vez para confirmar"; return; } try { await api("POST", "/api/sesiones/cerrar"); avisoRapido("Listo: todos los demás tendrán que volver a entrar"); cs.textContent = "Cerrar sesión en todos los otros celulares"; delete cs.dataset.ok; } catch (e) { avisoRapido(e.message); } };
     const bit = $("#bitacora");
     if (bit) bit.parentElement.ontoggle = async () => { if (!bit.parentElement.open) return; try { const b = await api("GET", "/api/bitacora"); bit.innerHTML = b.length ? `<div class="scroll"><table><tbody>${b.map((x) => `<tr><td>${esc(limaISO(x.creado).slice(5).split("-").reverse().join("/"))} ${esc(new Date(Date.parse(x.creado) - 5 * 3600e3).toISOString().slice(11, 16))}</td><td><b>${esc(x.autor)}</b> ${esc(x.accion)}</td><td class="gris">${esc(x.detalle || "")}</td></tr>`).join("")}</tbody></table></div>` : '<p class="gris">Aún no hay movimientos.</p>'; } catch (e) { bit.textContent = e.message; } };
   }

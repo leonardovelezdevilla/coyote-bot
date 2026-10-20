@@ -26,15 +26,16 @@ const hoy = new Date(Date.now() - 5 * 3600e3).toISOString().slice(0, 10);
 const dia = (k) => { const d = new Date(hoy + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + k); return d.toISOString().slice(0, 10); };
 
 // ---------- Personal: profesor vs administrativo ----------
-await katy("POST", "/api/personal", { nombre: "Pedro Profesor", rol: "Profesor", sede: "SMP", pin: "1111", tipo_pago: "clase", tarifa: 25 });
-await katy("POST", "/api/personal", { nombre: "Rosa Admin", rol: "Administrativo de sede", sede: "SMP", pin: "2222" });
+await katy("POST", "/api/personal", { nombre: "Pedro Profesor", rol: "Profesor", sede: "SMP", pin: "111111", tipo_pago: "clase", tarifa: 25 });
+await katy("POST", "/api/personal", { nombre: "Rosa Admin", rol: "Administrativo de sede", sede: "SMP", pin: "222222" });
 const entrar = async (nombre, pin) => { const w = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre, clave: pin }), redirect: "manual" }); return api((w.headers.get("set-cookie") || "").split(";")[0]); };
-const pedro = await entrar("Pedro Profesor", "1111"), rosa = await entrar("Rosa Admin", "2222");
+const pedro = await entrar("Pedro Profesor", "111111"), rosa = await entrar("Rosa Admin", "222222");
 ok((await pedro("POST", "/api/ventas", { padre: "X", plan: "ciclo", monto: 140 })).status === 403, "Un profesor no puede vender");
 ok((await pedro("GET", "/api/caja?mes=" + hoy.slice(0, 7))).status === 403, "Ni ver la caja");
+{ const lp = (await pedro("GET", "/api/leads")).data; ok(lp.every((l) => l.monto === undefined && l.saldo === undefined), "Ni ver montos ni deudas en las fichas"); const cp = (await pedro("GET", "/api/config")).data.config; ok(!cp.avisos && !cp.pago && !cp.atencion?.excluidos, "Ni la configuración privada (números de Katy, excluidos)"); }
 ok((await rosa("POST", "/api/ventas", { padre: "Venta Rosa", plan: "ciclo", monto: 140, metodo: "Yape" })).status === 201, "El administrativo de sede sí vende el paquete publicado");
 ok((await rosa("POST", "/api/ventas", { padre: "Cuota Rosa", plan: "ciclo", monto: 100, saldo: 40 })).status === 403, "Pero no en cuotas ni con otro monto");
-const hp = await (await fetch(BOT + "/panel", { headers: { Cookie: (await (async () => { const w = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "Pedro Profesor", clave: "1111" }), redirect: "manual" }); return (w.headers.get("set-cookie") || "").split(";")[0]; })()) } })).text();
+const hp = await (await fetch(BOT + "/panel", { headers: { Cookie: (await (async () => { const w = await fetch(BOT + "/entrar", { method: "POST", body: new URLSearchParams({ nombre: "Pedro Profesor", clave: "111111" }), redirect: "manual" }); return (w.headers.get("set-cookie") || "").split(";")[0]; })()) } })).text();
 ok(!/data-v="caja"/.test(hp) && /sin-caja/.test(hp), "El panel del profesor no tiene pestaña Caja");
 
 // ---------- QR de sede: entrada y salida ----------
@@ -45,14 +46,14 @@ ok(w.status === 200 && /<svg/.test(hq), "Katy puede abrir e imprimir el QR de la
 // el QR no imprime el código en texto; lo reconstruimos desde la firma: lo obtenemos probando el endpoint con un código inválido primero
 ok((await pedro("POST", "/api/jornada", { codigo: "SEDE:SMP:0000000000000000" })).status === 400, "Un QR falsificado no sirve");
 // obtener el código real: el servidor lo firma con la clave; lo sacamos del SVG no es posible, así que lo calculamos igual que el servidor
-const firma = crypto.createHmac("sha256", "sesion:clave-panel").update("sede:SMP").digest("hex").slice(0, 16).toUpperCase();
+const firma = crypto.createHmac("sha256", "qr:secreto-sesion-prueba").update("sede:SMP").digest("hex").slice(0, 16).toUpperCase();
 const cod = "SEDE:SMP:" + firma;
 let c = (await katy("GET", "/api/config")).data.config; c.personalControl.horaInicio.SMP = "00:01"; c.personalControl.toleranciaMin = 0; await katy("PUT", "/api/config", c); await sleep(16000);
 let r = await pedro("POST", "/api/jornada", { codigo: cod });
 ok(r.status === 200 && r.data.tipo === "entrada" && r.data.tarde === true, `Pedro escanea el QR: entrada ${r.data.entrada}, marcada como tarde (empieza 00:01)`);
 r = await pedro("POST", "/api/jornada", { codigo: cod });
 ok(r.data.tipo === "salida" && r.data.salida, "Vuelve a escanear: salida");
-ok((await pedro("POST", "/api/jornada", { codigo: "SEDE:LO:" + crypto.createHmac("sha256", "sesion:clave-panel").update("sede:LO").digest("hex").slice(0, 16).toUpperCase() })).status === 400, "El QR de otra sede no le sirve");
+ok((await pedro("POST", "/api/jornada", { codigo: "SEDE:LO:" + crypto.createHmac("sha256", "qr:secreto-sesion-prueba").update("sede:LO").digest("hex").slice(0, 16).toUpperCase() })).status === 400, "El QR de otra sede no le sirve");
 ok((await katy("POST", "/api/jornada", { codigo: cod })).status === 400, "Katy no marca jornada (es para el personal)");
 r = await katy("GET", "/api/jornada?mes=" + hoy.slice(0, 7));
 ok(r.data.jornadas.some((j) => j.nombre === "Pedro Profesor" && j.tarde === 1 && j.salida), "Katy ve las jornadas del mes con tardanzas");
