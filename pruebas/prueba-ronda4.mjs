@@ -11,7 +11,7 @@ const api = async (m, u, b) => { const x = await fetch(BOT + u, { method: m, hea
 let r = await api("GET", "/api/estado");
 ok(r.status === 200 && Array.isArray(r.data.faltan) && r.data.faltan.some((f) => /Yape/.test(f.que)), `Lista de «primer día»: faltan ${r.data.faltan.length} datos (incluye el Yape de la escuela)`);
 ok(r.data.errorWA === null, "Sin errores de WhatsApp registrados");
-sql("INSERT INTO ajustes (clave, valor, actualizado) VALUES ('error_whatsapp', '{\\"motivo\\":\\"El token de WhatsApp venció\\",\\"status\\":401}', '2026-01-01') ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor");
+sql(`INSERT INTO ajustes (clave, valor, actualizado) VALUES ('error_whatsapp', '{"motivo":"El token de WhatsApp venció","status":401}', '2026-01-01') ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`);
 r = await api("GET", "/api/estado");
 ok(r.data.errorWA && /token/.test(r.data.errorWA.motivo), "Si Meta rechaza envíos, el panel lo sabe y lo muestra en Hoy");
 sql("DELETE FROM ajustes WHERE clave='error_whatsapp'");
