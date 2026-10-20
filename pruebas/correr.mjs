@@ -15,7 +15,9 @@ try {
   for (let i = 0; i < 60; i++) { try { await fetch("http://127.0.0.1:8787/entrar"); break; } catch { await esperar(1000); } }
   for (const p of ORDEN) {
     writeFileSync(dir + "enviados.jsonl", readFileSync(dir + "enviados.jsonl", "utf8"));
-    const r = execSync(`node ${dir}${p}.mjs`, { encoding: "utf8", cwd: dir + ".." });
+    let r;
+    try { r = execSync(`node ${dir}${p}.mjs`, { encoding: "utf8", cwd: dir + "..", stdio: ["ignore", "pipe", "pipe"] }); }
+    catch (e) { r = (e.stdout || "") + "\n✘ " + p + " se detuvo: " + String(e.stderr || e.message).split("\n").find((l) => /Error/.test(l)); }
     const ok = (r.match(/^✔/gm) || []).length, mal = (r.match(/^✘/gm) || []).length;
     total += ok; fallas += mal;
     console.log(`${p}: ${ok} ✔${mal ? ` ${mal} ✘` : ""}`);
