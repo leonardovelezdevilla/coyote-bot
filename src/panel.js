@@ -713,11 +713,11 @@ function appPersonas() {
         const m = r.mes.find((x) => x.sede === sel.value);
         resumen.textContent = `${items.length} inscritos${m && m.total ? `. Últimos 30 días: vinieron ${Math.round((m.presentes / m.total) * 100)} de cada 100 marcados` : ""}.`;
         items.forEach((a) => {
-          const f = el("div", { className: "fila-chat" }); f.style.gridTemplateColumns = "minmax(0,1fr) auto";
-          const quien = el("span"); quien.innerHTML = `<span class="quien">${esc(a.padre || a.perfil || "Sin nombre")}</span><span class="ult">${esc(a.edad || "")}${a.hora ? ` · llegó ${esc(a.hora)}` : ""}${a.fin_ciclo && a.fin_ciclo < fecha ? " · clases vencidas" : ""}</span>`;
+          const f = el("div", { className: "fila-chat" }); f.style.gridTemplateColumns = "1fr"; f.style.gap = "8px"; // nombre arriba, botones grandes abajo
+          const quien = el("span"); quien.innerHTML = `<span class="quien" style="white-space:normal;overflow:visible;line-height:1.15">${esc(a.padre || a.perfil || "Sin nombre")}</span><span class="ult" style="white-space:normal;overflow:visible">${esc(a.edad || "")}${a.hora ? ` · llegó ${esc(a.hora)}` : ""}${a.fin_ciclo && a.fin_ciclo < fecha ? " · clases vencidas" : ""}</span>`;
           const acc = el("span", { className: "acc" }); acc.style.flexWrap = "nowrap";
           const bV = boton("Vino", a.presente === 1 ? "exito" : "", "ok"), bF = boton("Faltó", a.presente === 0 ? "principal" : "", "no");
-          bV.style.minHeight = bF.style.minHeight = "44px";
+          bV.style.minHeight = bF.style.minHeight = "48px"; bV.style.flex = bF.style.flex = "1";
           const marcar = async (p) => { const nuevo = a.presente === p ? null : p; try { await api("PUT", "/api/asistencia", { lead_id: a.id, fecha, presente: nuevo }); } catch (e) { if (e.message && /conexión/.test(e.message) || !navigator.onLine) { window.encolar("PUT", "/api/asistencia", { lead_id: a.id, fecha, presente: nuevo }); avisoRapido("Sin señal: la marca se guardó y se enviará sola"); } else { avisoRapido(e.message); return; } } a.presente = nuevo; pintarL(); };
           bV.onclick = () => marcar(1); bF.onclick = () => marcar(0);
           acc.append(bV, bF); f.append(quien, acc); lista.append(f);
