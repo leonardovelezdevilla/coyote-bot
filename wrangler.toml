@@ -19,6 +19,10 @@ crons = ["0 * * * *"]
 
 # Copias de seguridad semanales (opcional). Crea el depósito con: npx wrangler r2 bucket create coyote-copias
 # Si no quieres usarlo, borra estas tres líneas.
+# Copia en Google Drive (opcional): DRIVE_CARPETA = id de la carpeta compartida con la cuenta de servicio;
+# el JSON de la cuenta va en el secreto GOOGLE_CUENTA. Ver GUIA.md.
+# vars.DRIVE_CARPETA se agrega en [vars] de arriba cuando se configure.
+
 [[r2_buckets]]
 binding = "COPIAS"
 bucket_name = "coyote-copias"

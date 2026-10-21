@@ -10,7 +10,8 @@
 
 import { ESTADOS, SEDE_IDS, cargarConfig, guardarConfig, restaurarConfig, deshacerConfig, cambiosGuardados, validarConfig, leerValor, guardarValor, listaNumeros, DEFAULTS } from "./config.js";
 import { verificarFirma, igualSeguro, describirEntrante, registrar, wa } from "./whatsapp.js";
-import { atenderMensaje, tareasDeLaHora, cambiarAtencion, avisar, avisarSiguienteEnEspera, revisarCupos, copiaSeguridad } from "./bot.js";
+import { atenderMensaje, tareasDeLaHora, cambiarAtencion, avisar, avisarSiguienteEnEspera, revisarCupos, copiaSeguridad, guardarCopia } from "./bot.js";
+import { driveConfigurado } from "./drive.js";
 import { sumarDias, limaHoy } from "./fechas.js";
 import { resumenCampanas, enviarTanda, avisoSede, cuantosEnSede } from "./campanas.js";
 import { panelHTML, entrarHTML } from "./panel.js";
@@ -616,6 +617,15 @@ async function api(req, env, url, ctx, sesion = { rol: "admin" }) {
   if (ruta === "/api/referidos" && m === "GET") {
     const { results } = await env.DB.prepare("SELECT r.id, r.padre, r.perfil, r.sede, COUNT(l.id) traidos, SUM(l.estado = 'inscrito') inscritos FROM leads l JOIN leads r ON r.id = l.referido_por WHERE l.archivado = 0 GROUP BY r.id ORDER BY inscritos DESC, traidos DESC LIMIT 50").all();
     return json(results);
+  }
+  if (ruta === "/api/copia/drive" && m === "POST" && sesion.rol === "admin") {
+    if (!driveConfigurado(env)) return json({ error: "La copia en Google Drive no está configurada. Está explicado en la guía, sección «Copia en Google Drive»." }, 400);
+    const r = await guardarCopia(env, { soloDrive: true });
+    ctx.waitUntil(anotar(env, autor, "guardó copia en Drive", r.drive));
+    return r.drive === "ok" ? json({ ok: true }) : json({ error: "No se pudo guardar en Drive. " + String(r.drive).replace(/^error: /, "") }, 502);
+  }
+  if (ruta === "/api/copia/estado" && m === "GET" && sesion.rol === "admin") {
+    return json({ drive: driveConfigurado(env), ultima: await leerValor(env, "drive_ultima"), error: await leerValor(env, "drive_error"), r2: !!env.COPIAS });
   }
   if (ruta === "/api/copia.json" && m === "GET" && sesion.rol === "admin") {
     const datos = await copiaSeguridad(env);

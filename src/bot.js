@@ -4,6 +4,8 @@
 
 import { cargarConfig, llenar, leerValor, guardarValor } from "./config.js";
 import { wa } from "./whatsapp.js";
+import { driveConfigurado, subirADrive } from "./drive.js";
+import { ESTADOS } from "./config.js";
 import { limaHoy, sumarDias, proximasFechas, fechaCorta, fechaLarga, ahoraISO } from "./fechas.js";
 
 const SESION_HORAS = 24;
@@ -774,16 +776,50 @@ export async function copiaSeguridad(env) {
   if (datos.tablas.personal) datos.tablas.personal = datos.tablas.personal.map(({ pin_hash, ...p }) => p); // sin PIN
   return datos;
 }
-export async function guardarCopia(env) {
-  if (!env.COPIAS) return { guardada: false, motivo: "sin depósito R2" };
+// Archivos para Excel/Sheets: personas, caja y asistencia
+export async function hojasCSV(env) {
+  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const bom = "\ufeff";
+  const { results: leads } = await env.DB.prepare("SELECT * FROM leads WHERE archivado = 0 ORDER BY creado").all();
+  const cols = ["id", "creado", "padre", "perfil", "wa_id", "edad", "sede", "origen", "estado", "clase_fecha", "monto", "saldo", "clases_pagadas", "inscrito_desde", "fin_ciclo", "uniforme_talla", "nota"];
+  const nombres = ["N.º", "Llegó", "Nombre", "Nombre en WhatsApp", "Celular", "Edad", "Sede", "Cómo llegó", "Estado", "Clase de prueba", "Pagó (S/)", "Debe (S/)", "Clases pagadas", "Inscrito desde", "Clases hasta", "Talla", "Nota"];
+  const personas = bom + [nombres.join(","), ...leads.map((r) => cols.map((c) => esc(c === "estado" ? ESTADOS[r[c]] || r[c] : r[c])).join(","))].join("\n");
+  const { results: movs } = await env.DB.prepare("SELECT fecha, tipo, categoria, sede, monto, nota, autor FROM movimientos ORDER BY fecha, id").all();
+  const caja = bom + ["Fecha,Tipo,Categoría,Sede,Monto (S/),Nota,Quién", ...movs.map((r) => [r.fecha, r.tipo, r.categoria, r.sede, r.monto, r.nota, r.autor].map(esc).join(","))].join("\n");
+  const { results: asis } = await env.DB.prepare("SELECT COALESCE(l.padre, l.perfil) padre, l.sede, a.fecha, a.presente, a.hora, a.autor FROM asistencias a JOIN leads l ON l.id = a.lead_id ORDER BY l.sede, l.padre, a.fecha").all();
+  const asistencia = bom + ["Nombre,Sede,Fecha,Vino,Hora,Quién marcó", ...asis.map((r) => [r.padre, r.sede, r.fecha, r.presente ? "Sí" : "No", r.hora, r.autor].map(esc).join(","))].join("\n");
+  return { personas, caja, asistencia };
+}
+
+// Copia completa: en el depósito de Cloudflare (R2) y en el Google Drive de la escuela, si están configurados
+export async function guardarCopia(env, { soloDrive = false } = {}) {
+  const resultado = { r2: null, drive: null };
   const datos = await copiaSeguridad(env);
+  const json = JSON.stringify(datos);
   const nombre = `copia-${limaHoy()}.json`;
-  await env.COPIAS.put(nombre, JSON.stringify(datos), { httpMetadata: { contentType: "application/json" } });
-  // conservar las últimas 12
-  const lista = await env.COPIAS.list({ prefix: "copia-" });
-  const viejas = lista.objects.map((o) => o.key).sort().slice(0, -12);
-  for (const k of viejas) await env.COPIAS.delete(k);
-  return { guardada: true, nombre };
+  if (env.COPIAS && !soloDrive) {
+    await env.COPIAS.put(nombre, json, { httpMetadata: { contentType: "application/json" } });
+    const lista = await env.COPIAS.list({ prefix: "copia-" }); // conservar las últimas 12
+    for (const k of lista.objects.map((o) => o.key).sort().slice(0, -12)) await env.COPIAS.delete(k);
+    resultado.r2 = nombre;
+  }
+  if (driveConfigurado(env)) {
+    try {
+      const hojas = await hojasCSV(env);
+      await subirADrive(env, "Coyote - copia completa.json", json, "application/json");
+      await subirADrive(env, `Coyote - copia ${limaHoy().slice(0, 7)}.json`, json, "application/json"); // una por mes, para volver atrás
+      await subirADrive(env, "Coyote - personas.csv", hojas.personas, "text/csv");
+      await subirADrive(env, "Coyote - caja.csv", hojas.caja, "text/csv");
+      await subirADrive(env, "Coyote - asistencia.csv", hojas.asistencia, "text/csv");
+      resultado.drive = "ok";
+      await guardarValor(env, "drive_ultima", ahoraISO());
+      await env.DB.prepare("DELETE FROM ajustes WHERE clave = 'drive_error'").run();
+    } catch (e) {
+      resultado.drive = "error: " + e.message;
+      await guardarValor(env, "drive_error", String(e.message).slice(0, 200));
+    }
+  }
+  return resultado;
 }
 
 // Reporte del mes anterior, el día 1

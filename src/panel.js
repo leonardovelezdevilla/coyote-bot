@@ -1223,7 +1223,16 @@ function appNumeros() {
     v.append(caja);
     pintarCaja();
 
-    const d = el("section", { className: "tarjeta" }); d.innerHTML = `<h3>Lista completa y copia de seguridad</h3><p class="gris">Descarga a todas las personas en un archivo que se abre con Excel o Google Sheets. La copia completa guarda todo el sistema (personas, chats, caja, asistencia); además se guarda sola cada domingo en Cloudflare.</p><div class="acc"><a class="btn" href="/api/export.csv">Descargar lista</a><a class="btn claro" href="/api/copia.json">Descargar copia completa</a></div>`;
+    const d = el("section", { className: "tarjeta" }); d.innerHTML = `<h3>Lista completa y copias de seguridad</h3><p class="gris">Descarga a todas las personas en un archivo que se abre con Excel o Google Sheets. La copia completa guarda todo el sistema (personas, chats, caja, asistencia); además se guarda sola cada domingo en Cloudflare y, si está configurado, en el Google Drive de la escuela.</p><div class="acc"><a class="btn" href="/api/export.csv">Descargar lista</a><a class="btn claro" href="/api/copia.json">Descargar copia completa</a></div><p class="gris" id="driveEstado" style="margin-top:10px"></p>`;
+    const bDrive = boton("Guardar copia en Google Drive ahora", "exito", "ok"); bDrive.hidden = true; d.append(bDrive);
+    api("GET", "/api/copia/estado").then((e) => {
+      const p2 = d.querySelector("#driveEstado");
+      if (!e.drive) { p2.textContent = "Copia en Google Drive: no configurada (ver la guía, «Copia en Google Drive»)."; return; }
+      bDrive.hidden = false;
+      p2.textContent = e.error ? `La última copia en Drive falló: ${e.error}` : e.ultima ? `Última copia en Google Drive: ${fechaBonita(limaISO(e.ultima))}.` : "Aún no se ha guardado ninguna copia en Drive.";
+      if (e.error) p2.style.color = "var(--rojo)";
+    }).catch(() => {});
+    bDrive.onclick = async () => { bDrive.disabled = true; bDrive.lastChild.textContent = "Guardando…"; try { await api("POST", "/api/copia/drive"); avisoRapido("Copia guardada en Google Drive"); d.querySelector("#driveEstado").textContent = `Última copia en Google Drive: ${fechaBonita(limaHoy())}.`; } catch (e) { avisoRapido(e.message); } bDrive.disabled = false; bDrive.lastChild.textContent = "Guardar copia en Google Drive ahora"; };
     v.append(d);
   });
 }

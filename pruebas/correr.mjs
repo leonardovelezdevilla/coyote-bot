@@ -8,11 +8,18 @@ import { readFileSync, writeFileSync } from "node:fs";
 const dir = new URL(".", import.meta.url).pathname;
 const ORDEN = ["prueba-completa", "prueba-chats", "prueba-entender", "prueba-lista", "prueba-persona", "prueba-mejoras", "prueba-modulos", "prueba-personal", "prueba-ronda3", "prueba-ronda4"];
 execSync("rm -rf .wrangler && npx wrangler d1 execute coyote-bot --local --file=schema.sql", { stdio: "ignore" });
-const mock = spawn("node", [dir + "mock.mjs"], { stdio: "ignore" });
-const dev = spawn("npx", ["wrangler", "dev", "--local", "--test-scheduled", "--port", "8787"], { stdio: "ignore" });
-let total = 0, fallas = 0;
+// Si quedó un servidor de una corrida anterior, avisar en vez de esperar para siempre
+for (const puerto of [8787, 9999]) {
+  try { await fetch(`http://127.0.0.1:${puerto}/`); console.error(`El puerto ${puerto} ya está ocupado (¿quedó un wrangler o mock de otra corrida?). Ciérralo y vuelve a correr npm test.`); process.exit(2); } catch {}
+}
+// detached + process group: así al terminar se cierra wrangler y no solo npx
+const mock = spawn("node", [dir + "mock.mjs"], { stdio: "ignore", detached: true });
+const dev = spawn("npx", ["wrangler", "dev", "--local", "--test-scheduled", "--port", "8787"], { stdio: "ignore", detached: true });
+const apagar = (p) => { try { process.kill(-p.pid, "SIGTERM"); } catch {} try { p.kill(); } catch {} };
+let total = 0, fallas = 0, listo = false;
 try {
-  for (let i = 0; i < 60; i++) { try { await fetch("http://127.0.0.1:8787/entrar"); break; } catch { await esperar(1000); } }
+  for (let i = 0; i < 90; i++) { try { await fetch("http://127.0.0.1:8787/entrar"); listo = true; break; } catch { await esperar(1000); } }
+  if (!listo) throw new Error("wrangler dev no arrancó en 90 s");
   for (const p of ORDEN) {
     writeFileSync(dir + "enviados.jsonl", readFileSync(dir + "enviados.jsonl", "utf8"));
     let r;
@@ -23,6 +30,6 @@ try {
     console.log(`${p}: ${ok} ✔${mal ? ` ${mal} ✘` : ""}`);
     if (mal) console.log(r.split("\n").filter((l) => l.startsWith("✘")).join("\n"));
   }
-} finally { mock.kill(); dev.kill(); }
+} finally { apagar(mock); apagar(dev); }
 console.log(`\nTotal: ${total} pruebas pasaron${fallas ? `, ${fallas} fallaron` : ""}`);
 process.exit(fallas ? 1 : 0);

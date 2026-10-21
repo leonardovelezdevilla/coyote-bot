@@ -7,3 +7,6 @@ ADMIN_PASSWORD=una-clave-para-el-panel
 SESSION_SECRET=un-texto-largo-y-aleatorio
 # PRUEBAS=1 habilita /api/ejecutar-tareas (solo en local o en el entorno de prueba)
 PRUEBAS=1
+# Copia en Google Drive (opcional), ver GUIA.md
+# GOOGLE_CUENTA={...json de la cuenta de servicio...}
+# DRIVE_CARPETA=id-de-la-carpeta

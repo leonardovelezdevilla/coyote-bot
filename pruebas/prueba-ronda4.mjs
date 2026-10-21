@@ -9,7 +9,7 @@ const cookie = fs.readFileSync(new URL("./cookie.txt", import.meta.url), "utf8")
 const api = async (m, u, b) => { const x = await fetch(BOT + u, { method: m, headers: { Cookie: cookie, "Content-Type": "application/json" }, body: b ? JSON.stringify(b) : undefined }); return { status: x.status, data: x.headers.get("content-type")?.includes("json") ? await x.json() : await x.text() }; };
 
 let r = await api("GET", "/api/estado");
-ok(r.status === 200 && Array.isArray(r.data.faltan) && r.data.faltan.some((f) => /Yape/.test(f.que)), `Lista de «primer día»: faltan ${r.data.faltan.length} datos (incluye el Yape de la escuela)`);
+ok(r.status === 200 && Array.isArray(r.data.faltan) && r.data.faltan.length > 0 && r.data.faltan.every((f) => f.que && /Ajustes/.test(f.donde)), `Lista de «primer día»: faltan ${r.data.faltan.length} datos, cada uno dice dónde se completa en Ajustes`);
 ok(r.data.errorWA === null, "Sin errores de WhatsApp registrados");
 sql(`INSERT INTO ajustes (clave, valor, actualizado) VALUES ('error_whatsapp', '{"motivo":"El token de WhatsApp venció","status":401}', '2026-01-01') ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`);
 r = await api("GET", "/api/estado");
@@ -35,3 +35,16 @@ console.log(fallas ? `\n${fallas} prueba(s) fallaron` : "\nTodas las pruebas de 
   ok(/default-src 'self'/.test(w5.headers.get("content-security-policy") || "") && w5.headers.get("x-content-type-options") === "nosniff", "La web también lleva cabeceras de seguridad");
 }
 console.log(fallas ? `\n${fallas} prueba(s) fallaron` : "\nTodas las pruebas de la ronda 4 (seguridad) pasaron");
+
+// ---------- Copias en Google Drive (sin configurar en pruebas) ----------
+{
+  r = await api("GET", "/api/copia/estado");
+  ok(r.status === 200 && r.data.drive === false && r.data.r2 === true, "Números sabe si la copia en Drive está configurada (aquí no) y si hay depósito R2");
+  r = await api("POST", "/api/copia/drive");
+  ok(r.status === 400 && /Google Drive/.test(r.data.error), "Sin configurar, el botón de Drive explica qué falta en vez de fallar en silencio");
+  sql("INSERT INTO ajustes (clave, valor, actualizado) VALUES ('drive_error', 'La carpeta no está compartida', '2026-01-01') ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor");
+  r = await api("GET", "/api/copia/estado");
+  ok(/compartida/.test(r.data.error || ""), "Si la última copia a Drive falló, Números muestra el motivo en palabras");
+  sql("DELETE FROM ajustes WHERE clave='drive_error'");
+}
+console.log(fallas ? `\n${fallas} prueba(s) fallaron` : "\nTodas las pruebas de la ronda 4 (copias) pasaron");

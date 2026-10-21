@@ -355,9 +355,22 @@ Flujo de trabajo: cambio → `npm test` en la computadora → `npm run deploy:pr
 ## Copias de seguridad y recuperación
 
 - **Time Travel de D1:** Cloudflare guarda el historial de la base por 30 días. Si alguien borra algo por error, se puede volver a cualquier minuto: `npx wrangler d1 time-travel restore coyote-bot --timestamp=2027-01-15T14:00:00Z` (antes: `npx wrangler d1 time-travel info coyote-bot`).
-- **Copia semanal:** cada domingo a las 4 a. m. el bot guarda un JSON con todas las tablas en el depósito `coyote-copias` (se conservan las últimas 12). Se crea una vez con `npx wrangler r2 bucket create coyote-copias`; si no se crea, el bot simplemente no guarda la copia.
+- **Copia semanal:** cada domingo a las 4 a. m. el bot guarda un JSON con todas las tablas en el depósito `coyote-copias` (se conservan las últimas 12) y, si está configurado, en Google Drive (abajo). Se crea una vez con `npx wrangler r2 bucket create coyote-copias`; si no se crea, el bot simplemente no guarda la copia.
 - **Copia mensual de Katy:** el resumen del día 1 le recuerda descargar la **copia completa** desde Números y guardarla en su Google Drive. También `npm run db:copia` descarga un `.sql` desde la computadora.
 - Las copias no incluyen los PIN del personal (se vuelven a asignar si hace falta).
+
+### Copia en Google Drive (opcional, recomendada)
+
+Con esto, cada domingo (y cuando Katy toque **Guardar copia en Google Drive ahora**, en Números) aparecen en una carpeta de su Drive cinco archivos que se reemplazan solos: `Coyote - copia completa.json`, una copia por mes (`Coyote - copia 2027-01.json`, para volver atrás), y tres hojas que se abren con Excel o Google Sheets: `Coyote - personas.csv`, `Coyote - caja.csv`, `Coyote - asistencia.csv`. Se configura una sola vez (15 minutos):
+
+1. Entra a <https://console.cloud.google.com> con el Gmail de la escuela, crea un proyecto (por ejemplo «Coyote») y en **APIs y servicios → Biblioteca** activa **Google Drive API**.
+2. En **IAM y administración → Cuentas de servicio** crea una cuenta (nombre «coyote-copias»). Entra a ella → **Claves → Agregar clave → Crear clave nueva → JSON**. Se descarga un archivo `.json`; guárdalo en un lugar seguro y **no lo subas al repositorio**.
+3. En el Drive de Katy crea la carpeta **Copias Coyote** y compártela (botón Compartir, permiso **Editor**) con el correo de la cuenta de servicio (termina en `@...iam.gserviceaccount.com`, está dentro del JSON como `client_email`).
+4. Abre la carpeta en el navegador; el id es lo que va después de `folders/` en la dirección (una cadena larga de letras y números). Ponlo en `wrangler.toml`, dentro de `[vars]`: `DRIVE_CARPETA = "ese-id"` (y también en `[env.prueba.vars]` si quieres copias del entorno de prueba, idealmente en otra carpeta).
+5. Guarda el JSON como secreto: `npx wrangler secret put GOOGLE_CUENTA` y pega **todo el contenido** del archivo en una sola línea (en Windows: abre el JSON con el Bloc de notas, selecciona todo, copia). Vuelve a desplegar (`npm run deploy`).
+6. En el panel → Números, abajo, debe decir «Aún no se ha guardado ninguna copia en Drive» y aparecer el botón **Guardar copia en Google Drive ahora**. Tócalo y revisa la carpeta en Drive.
+
+Si una copia falla, Números lo muestra en rojo con el motivo (lo más común: la carpeta no está compartida con la cuenta de servicio, o el id es de otra carpeta). Katy puede abrir los `.csv` directamente desde Drive con Google Sheets. Las copias en Drive tampoco incluyen los PIN.
 
 ## Avisos del propio sistema
 
