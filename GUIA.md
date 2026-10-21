@@ -1,16 +1,14 @@
 # Bot de WhatsApp de la Escuela Coyote — guía de instalación
 
+Esta es la guía técnica, para quien instala y mantiene el sistema. La guía para Katy y el personal («Guía de uso del Sistema Coyote») es otro documento, en lenguaje sencillo.
+
 Al terminar esta guía queda funcionando:
 
-1. **El bot**, en un número de WhatsApp (nuevo o uno que ya tengan; ver «¿Qué número usar?»). Pregunta la edad y la sede, da precio y horario, responde preguntas frecuentes escritas a su manera, agenda la clase de prueba gratis, envía la ubicación de la cancha y pasa el chat a Katy cuando hace falta una persona.
-2. **Las automatizaciones**, que corren solas cada hora:
-   - recordatorio el día antes de la clase, con botones «Sí, voy» y «Cambiar día»;
-   - seguimiento al día siguiente de la clase, invitando a inscribirse;
-   - un mensaje para retomar las conversaciones que quedaron a medias;
-   - avisos a Katy cuando alguien quiere inscribirse;
-   - un resumen cada mañana a las 8;
-   - la palabra **BAJA**, que saca a esa persona de las promociones.
-3. **El panel de Katy**, una página con clave que funciona como app en el celular. Tiene la pantalla Hoy, los **Chats** (Katy responde desde ahí con el mismo número del bot), la lista de personas, los números, los mensajes a grupos y los ajustes del bot, sin tocar código. Reemplaza al «Registro Verano Coyote».
+1. **El bot**, en un número de WhatsApp (nuevo o uno que ya tengan; ver «¿Qué número usar?»). Pregunta la edad y la sede, da precio y horario, responde preguntas frecuentes escritas a su manera (y ofrece un menú con ellas), agenda la clase de prueba gratis, envía la ubicación de la cancha, detecta comprobantes de pago y pasa el chat a una persona cuando hace falta.
+2. **Las automatizaciones**, que corren solas cada hora: recordatorio y seguimiento de la clase de prueba, rescate de conversaciones a medias, resumen diario a las 8 y reporte mensual el día 1, aviso de renovación, recordatorio de cuotas, aviso por faltas seguidas, encuesta de satisfacción, alerta de cupos, copia de seguridad semanal (Cloudflare y Google Drive) y la palabra **BAJA**, que saca a esa persona de las promociones.
+3. **El panel**, una página con clave que funciona como app en el celular y en la laptop: Hoy, Personas, Chats (se responde con el mismo número del bot), Números (caja, cifras, campañas, copias), Ajustes y Ayuda. Katy entra con su clave; el personal de cada sede con nombre y PIN, y ve solo su sede.
+4. **Los módulos de gestión**: carnet QR con escaneo por cámara, pasar lista (también sin internet), ventas en la cancha, planes a medida y cuotas, control de entrada y salida del personal y pago del mes, caja por sede, uniformes, referidos y bitácora.
+5. **La página web pública** en `/`, editable desde Ajustes, y la página de privacidad en `/privacidad`.
 
 Tiempo estimado: 2 a 3 horas la primera vez, más la espera de aprobación de las plantillas en Meta (de horas a un par de días). Las plantillas son 12 en total (paso 6); la 12 solo hace falta si se enciende la lista de espera automática.
 
